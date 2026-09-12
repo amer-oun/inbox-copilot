@@ -1,6 +1,7 @@
+import type { Server } from "node:http";
 import { logger } from "../lib/logger.js";
 import { env } from "../lib/env.js";
-import { startAiStub } from "./aiStub.js";
+import { AiStubPortInUseError, startAiStub } from "./aiStub.js";
 
 /**
  * Entrypoint for the development AI stub: `pnpm --filter @inbox-copilot/api ai:stub`
@@ -21,7 +22,18 @@ if (env.ANTHROPIC_API_KEY !== "" && env.ANTHROPIC_BASE_URL !== stubUrl) {
   process.exit(0);
 }
 
-const server = await startAiStub();
+let server: Server;
+try {
+  server = await startAiStub();
+} catch (error) {
+  if (error instanceof AiStubPortInUseError) {
+    // Another stub already has the port, which is the outcome we wanted anyway.
+    // Exiting 0 keeps `pnpm dev` alive: the api and worker do not care who answers.
+    logger.info({ port: error.port }, "ai stub already running on this port; not starting a second");
+    process.exit(0);
+  }
+  throw error;
+}
 
 function shutdown(signal: NodeJS.Signals): void {
   logger.info({ signal }, "ai stub shutting down");

@@ -1,13 +1,18 @@
 import { randomBytes } from "node:crypto";
 import { redis } from "./redis.js";
 import { logger } from "./logger.js";
+import { AbortedError } from "./retry.js";
 
 /**
  * Single-instance Redis mutex (SET NX PX + fenced release).
  *
- * Used to serialize OAuth token refreshes: Microsoft rotates the refresh token
- * on every use, so two concurrent refreshes for one mailbox invalidate each
- * other and the mailbox ends up needing a manual reconnect.
+ * Used to serialize work that must not happen twice at once:
+ *   - OAuth token refreshes. Microsoft rotates the refresh token on every use, so
+ *     two concurrent refreshes for one mailbox invalidate each other and the
+ *     mailbox ends up needing a manual reconnect.
+ *   - thread summarization. Two messages of one thread enrich concurrently, both
+ *     miss the content-hash cache because neither has written yet, and one of the
+ *     two Sonnet calls is pure waste.
  *
  * The lock value is a random token and release is a compare-and-delete Lua
  * script, so a process whose lock already expired cannot delete someone else's.
@@ -28,6 +33,8 @@ export interface MutexOptions {
   waitMs?: number;
   /** Poll interval while waiting. */
   retryDelayMs?: number;
+  /** Abandons the wait when the work is cancelled (a retried or killed job). */
+  signal?: AbortSignal;
 }
 
 export class MutexTimeoutError extends Error {
@@ -37,8 +44,26 @@ export class MutexTimeoutError extends Error {
   }
 }
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Abortable poll delay. A cancelled job must stop waiting for a lock it no longer
+ * needs, rather than holding a worker slot until the wait deadline.
+ */
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AbortedError("mutex wait aborted"));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new AbortedError("mutex wait aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 /**
  * Runs `fn` while holding `key`. Waiters that acquire the lock after the holder
@@ -59,10 +84,12 @@ export async function withMutex<T>(
   const deadline = Date.now() + waitMs;
 
   for (;;) {
+    if (options.signal?.aborted) throw new AbortedError("mutex wait aborted");
+
     const acquired = await redis.set(lockKey, token, "PX", ttlMs, "NX");
     if (acquired === "OK") break;
     if (Date.now() >= deadline) throw new MutexTimeoutError(key, waitMs);
-    await sleep(retryDelayMs);
+    await sleep(retryDelayMs, options.signal);
   }
 
   try {

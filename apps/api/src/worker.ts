@@ -1,5 +1,6 @@
 import { UnrecoverableError, Worker, type Job } from "bullmq";
 import { disconnectDatabase } from "@inbox-copilot/db";
+import { connectRedis, disconnectRedis } from "./lib/redis.js";
 import { logger } from "./lib/logger.js";
 import { env } from "./lib/env.js";
 import {
@@ -196,6 +197,16 @@ sweepWorker.on("error", (error) => {
   logger.warn({ err: error }, "sweep worker error");
 });
 
+/*
+ * The request-path Redis client (lib/redis.ts) is lazy and has offline queueing
+ * disabled, so the first command against it throws unless it has been connected.
+ * BullMQ's own connections are separate, so nothing here connects it implicitly —
+ * and this process needs it for `withMutex`: the token-refresh lock, and the
+ * per-thread summarization lock. Until this call existed, the first refresh in a
+ * worker failed with "Stream isn't writeable".
+ */
+await connectRedis();
+
 // Registered here rather than at enqueue time: the schedule is a property of the
 // worker deployment, and upserting it makes a restart converge on one schedule.
 await scheduleAiSweep();
@@ -263,7 +274,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   // `close()` waits for in-flight jobs so a deploy does not abandon a backfill
   // halfway through a page.
   await Promise.all([worker.close(), enrichWorker.close(), sweepWorker.close()]);
-  await Promise.allSettled([closeQueues(), disconnectDatabase()]);
+  await Promise.allSettled([closeQueues(), disconnectRedis(), disconnectDatabase()]);
   process.exit(0);
 }
 

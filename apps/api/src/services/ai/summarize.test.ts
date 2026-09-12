@@ -17,6 +17,49 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
+/**
+ * A real (in-process) lock, not a pass-through stub: the behaviour under test is
+ * that the second caller *waits*, so a mock that simply ran `fn` would assert
+ * nothing. Mirrors withMutex's contract, including the timeout error.
+ */
+const mutexState = vi.hoisted(() => ({
+  held: new Set<string>(),
+  keys: [] as string[],
+  options: [] as Record<string, unknown>[],
+  /** Set to make every acquisition time out. */
+  alwaysTimeout: false,
+}));
+
+vi.mock("../../lib/mutex.js", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/mutex.js")>(
+    "../../lib/mutex.js",
+  );
+
+  return {
+    MutexTimeoutError: actual.MutexTimeoutError,
+    withMutex: async <T>(
+      key: string,
+      fn: () => Promise<T>,
+      options: Record<string, unknown> = {},
+    ): Promise<T> => {
+      mutexState.keys.push(key);
+      mutexState.options.push(options);
+
+      if (mutexState.alwaysTimeout) throw new actual.MutexTimeoutError(key, 0);
+
+      while (mutexState.held.has(key)) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      mutexState.held.add(key);
+      try {
+        return await fn();
+      } finally {
+        mutexState.held.delete(key);
+      }
+    },
+  };
+});
+
 const summaryFindFirst = vi.hoisted(() => vi.fn());
 const summaryUpsert = vi.hoisted(() => vi.fn());
 const usageCreate = vi.hoisted(() => vi.fn());
@@ -77,6 +120,10 @@ beforeEach(() => {
   create.mockReset().mockResolvedValue(summaryResponse);
   summaryFindFirst.mockReset().mockResolvedValue(null);
   summaryUpsert.mockReset().mockResolvedValue({ id: "sum_1" });
+  mutexState.held.clear();
+  mutexState.keys.length = 0;
+  mutexState.options.length = 0;
+  mutexState.alwaysTimeout = false;
   usageCreate.mockReset().mockResolvedValue({});
   usageCount.mockReset().mockResolvedValue(0);
   settingsFindFirst.mockReset().mockResolvedValue({
@@ -241,5 +288,133 @@ describe("prompt injection in a thread", () => {
     // The recorded output reports the injection as a finding of the analysis.
     expect(result.summary?.headline).toMatch(/injection/i);
     expect(result.summary?.actionItems).toEqual([]);
+  });
+});
+
+describe("concurrent summarization of one thread", () => {
+  /**
+   * A store that behaves like the database: the summary is invisible until it is
+   * written, which is exactly why the content-hash cache alone cannot stop this race.
+   */
+  function backedByAWrite(): void {
+    const rows = new Map<string, unknown>();
+    summaryFindFirst.mockImplementation(
+      async ({ where }: { where: { contentHash: string } }) =>
+        rows.get(where.contentHash) ?? null,
+    );
+    summaryUpsert.mockImplementation(
+      async ({
+        where,
+        create,
+      }: {
+        where: { threadId_contentHash: { contentHash: string } };
+        create: Record<string, unknown>;
+      }) => {
+        rows.set(where.threadId_contentHash.contentHash, {
+          id: "sum_1",
+          ...create,
+          model: MODELS.standard,
+        });
+        return { id: "sum_1" };
+      },
+    );
+  }
+
+  const thread = [msg(1), msg(2), msg(3)];
+
+  it("makes one model call when two messages of a thread enrich at once", async () => {
+    // The measured waste this removes: 48 calls for 47 rows on a real mailbox.
+    backedByAWrite();
+
+    const [first, second] = await Promise.all([summarize(thread), summarize(thread)]);
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(summaryUpsert).toHaveBeenCalledTimes(1);
+    // Both callers still get the summary; one of them got it from the other's write.
+    expect(first.summary?.headline).toBe(second.summary?.headline);
+    expect([first.fromCache, second.fromCache].sort()).toEqual([false, true]);
+  });
+
+  it("holds five concurrent enrichments of one thread to a single call", async () => {
+    backedByAWrite();
+
+    const results = await Promise.all(Array.from({ length: 5 }, () => summarize(thread)));
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(results.filter((result) => result.fromCache)).toHaveLength(4);
+  });
+
+  it("locks on the thread and its content hash, not the thread alone", async () => {
+    // A thread that gained a reply is different work and must not queue behind the
+    // older state's call.
+    await summarize(thread);
+    const expected = threadContentHash(["hash-1", "hash-2", "hash-3"]);
+
+    expect(mutexState.keys[0]).toBe(`ai-summary:${THREAD_ID}:${expected}`);
+  });
+
+  it("does not serialize two different thread states", async () => {
+    backedByAWrite();
+
+    await Promise.all([summarize(thread), summarize([...thread, msg(4)])]);
+
+    // Different hashes, different keys, both calls made — no false sharing.
+    expect(new Set(mutexState.keys).size).toBe(2);
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("never takes the lock when the cache already has the answer", async () => {
+    summaryFindFirst.mockResolvedValue({
+      id: "sum_1",
+      headline: "cached",
+      summary: "cached",
+      keyPoints: [],
+      actionItems: [],
+      model: MODELS.standard,
+    });
+
+    await summarize(thread);
+
+    // The fast path must not pay a Redis round trip per cached thread.
+    expect(mutexState.keys).toEqual([]);
+  });
+
+  it("gives the lock a lifetime longer than the request timeout", async () => {
+    // A lock that expires mid-call is worse than none: the waiter then duplicates it.
+    await summarize(thread);
+
+    expect(mutexState.options[0]?.["ttlMs"] as number).toBeGreaterThan(60_000);
+    expect(mutexState.options[0]?.["waitMs"] as number).toBeGreaterThan(10_000);
+  });
+
+  it("passes the abort signal so a cancelled job stops waiting", async () => {
+    const controller = new AbortController();
+
+    await summarize(thread, { signal: controller.signal });
+
+    expect(mutexState.options[0]?.["signal"]).toBe(controller.signal);
+  });
+
+  it("summarizes anyway when the lock cannot be had", async () => {
+    // Redis down, or a holder slower than the wait. Failing the job would be worse
+    // than one duplicate call, and the upsert key stops a duplicate row.
+    mutexState.alwaysTimeout = true;
+
+    const result = await summarize(thread);
+
+    expect(result.summary).not.toBeNull();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the answer written while it was waiting on a lock that timed out", async () => {
+    backedByAWrite();
+    await summarize(thread);
+    create.mockClear();
+    mutexState.alwaysTimeout = true;
+
+    const result = await summarize(thread);
+
+    expect(result.fromCache).toBe(true);
+    expect(create).not.toHaveBeenCalled();
   });
 });

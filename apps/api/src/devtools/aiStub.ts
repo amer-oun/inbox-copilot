@@ -327,9 +327,34 @@ export function createAiStubServer(): Server {
   });
 }
 
+/** Thrown when the port is taken — usually another stub, already doing the job. */
+export class AiStubPortInUseError extends Error {
+  constructor(readonly port: number) {
+    super(`port ${port} is already in use`);
+    this.name = "AiStubPortInUseError";
+  }
+}
+
 export async function startAiStub(port: number = env.AI_STUB_PORT): Promise<Server> {
   const server = createAiStubServer();
-  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+
+  await new Promise<void>((resolve, reject) => {
+    /*
+     * A listen failure must be a rejected promise, not an unhandled 'error' event.
+     * As an event it crashed the process — and since this runs inside `pnpm dev`,
+     * a stray stub on the port would have taken the api and worker down with it.
+     */
+    const onError = (error: NodeJS.ErrnoException): void => {
+      server.close();
+      reject(error.code === "EADDRINUSE" ? new AiStubPortInUseError(port) : error);
+    };
+
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1", () => {
+      server.removeListener("error", onError);
+      resolve();
+    });
+  });
 
   logger.info(
     { port, endpoint: `http://127.0.0.1:${port}` },
