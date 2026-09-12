@@ -1,0 +1,10 @@
+﻿packages:
+  - "apps/*"
+  - "packages/*"
+
+# Postinstall scripts we explicitly trust (prisma generates its engine/client here).
+allowBuilds:
+  "@prisma/client": true
+  "@prisma/engines": true
+  "prisma": true
+  "esbuild": true

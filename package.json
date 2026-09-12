@@ -1,0 +1,36 @@
+{
+  "name": "inbox-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI email assistant for Gmail + Outlook",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.4.1",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.4.1",
+      "onFail": "download"
+    }
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rimraf node_modules",
+    "db:generate": "pnpm --filter @inbox-copilot/db db:generate",
+    "db:migrate": "pnpm --filter @inbox-copilot/db db:migrate",
+    "db:deploy": "pnpm --filter @inbox-copilot/db db:deploy",
+    "db:studio": "pnpm --filter @inbox-copilot/db db:studio"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "turbo": "^2.10.12",
+    "typescript": "^7.0.2"
+  }
+}

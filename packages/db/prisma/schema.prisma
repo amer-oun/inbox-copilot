@@ -1,0 +1,486 @@
+// packages/db/prisma/schema.prisma
+// Inbox Copilot — data model
+// Design rules:
+//   1. Every provider-specific field is isolated; the rest of the app reads normalized rows.
+//   2. Every AI output is cached against a content hash so we never pay twice for the same input.
+//   3. Every row that belongs to a user carries userId for tenancy filtering.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Auth.js core (adapter-compatible — do not rename these fields)
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  timezone      String    @default("UTC") // IANA, e.g. "Africa/Tunis"
+  locale        String    @default("en")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts      Account[]
+  sessions      Session[]
+  mailAccounts  MailAccount[]
+  writingStyle  UserWritingStyle?
+  settings      UserSettings?
+  scheduled     ScheduledEmail[]
+  reminders     FollowUpReminder[]
+  usage         AiUsage[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String // "google" | "microsoft-entra-id"
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Connected mailboxes
+// ─────────────────────────────────────────────────────────────
+
+enum MailProviderType {
+  GMAIL
+  OUTLOOK
+}
+
+enum SyncStatus {
+  PENDING
+  BACKFILLING
+  ACTIVE
+  PAUSED
+  ERROR
+  REVOKED
+}
+
+/// One row per connected mailbox. A user may connect several.
+/// Tokens are AES-256-GCM ciphertext — never plaintext, never sent to the client.
+model MailAccount {
+  id           String           @id @default(cuid())
+  userId       String
+  provider     MailProviderType
+  emailAddress String
+  displayName  String?
+
+  // encrypted token vault
+  accessTokenEnc  String?  @db.Text
+  refreshTokenEnc String?  @db.Text
+  tokenIv         String?
+  tokenAuthTag    String?
+  keyVersion      Int      @default(1)
+  tokenExpiresAt  DateTime?
+  scopes          String[]
+
+  // sync cursors — Gmail uses historyId, Graph uses a deltaLink URL
+  syncCursor      String?   @db.Text
+  syncStatus      SyncStatus @default(PENDING)
+  syncError       String?   @db.Text
+  lastSyncedAt    DateTime?
+  backfilledUntil DateTime?
+
+  // push notification subscription
+  watchResourceId String?
+  watchExpiresAt  DateTime?
+  watchClientState String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  threads   Thread[]
+  messages  Message[]
+  scheduled ScheduledEmail[]
+
+  @@unique([provider, emailAddress, userId])
+  @@index([userId])
+  @@index([syncStatus, watchExpiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Normalized mail
+// ─────────────────────────────────────────────────────────────
+
+enum Category {
+  PRIMARY
+  WORK
+  PERSONAL
+  FINANCE
+  NEWSLETTER
+  PROMOTION
+  SOCIAL
+  NOTIFICATION
+  TRAVEL
+  SPAM
+  OTHER
+}
+
+enum Priority {
+  URGENT
+  HIGH
+  NORMAL
+  LOW
+}
+
+model Thread {
+  id             String @id @default(cuid())
+  mailAccountId  String
+  providerThreadId String
+
+  subject        String?  @db.Text
+  snippet        String?  @db.Text
+  participants   Json // [{ name, email, role: "from"|"to"|"cc" }]
+  messageCount   Int      @default(0)
+  firstMessageAt DateTime
+  lastMessageAt  DateTime
+
+  isRead     Boolean @default(false)
+  isStarred  Boolean @default(false)
+  isArchived Boolean @default(false)
+  isTrashed  Boolean @default(false)
+
+  // AI-derived, denormalized onto the thread for fast list queries
+  category      Category? 
+  priority      Priority?
+  priorityScore Int?      // 0-100
+  threatLevel   ThreatLevel @default(UNKNOWN)
+  needsReply    Boolean     @default(false)
+  language      String?
+
+  providerLabels String[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  mailAccount    MailAccount        @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
+  messages       Message[]
+  summaries      AiSummary[]
+  replyDrafts    ReplyDraft[]
+  reminders      FollowUpReminder[]
+  scheduled      ScheduledEmail[]
+
+  @@unique([mailAccountId, providerThreadId])
+  @@index([mailAccountId, lastMessageAt(sort: Desc)])
+  @@index([mailAccountId, category, lastMessageAt(sort: Desc)])
+  @@index([mailAccountId, priorityScore(sort: Desc)])
+}
+
+model Message {
+  id                String @id @default(cuid())
+  threadId          String
+  mailAccountId     String
+  providerMessageId String
+  internetMessageId String? // RFC 5322 Message-ID — used for threading on send
+
+  fromName  String?
+  fromEmail String
+  to        String[]
+  cc        String[]
+  bcc       String[]
+  replyTo   String?
+
+  subject  String? @db.Text
+  bodyText String? @db.Text
+  bodyHtml String? @db.Text
+  snippet  String? @db.Text
+
+  sentAt         DateTime
+  isRead         Boolean  @default(false)
+  isOutbound     Boolean  @default(false) // sent by the mailbox owner
+  isDraft        Boolean  @default(false)
+  hasAttachments Boolean  @default(false)
+
+  // raw headers we keep for auth/threading decisions
+  headers     Json?
+  authResults Json? // { spf, dkim, dmarc, returnPath, displayNameMismatch }
+
+  contentHash String // sha256 of normalized body — the AI cache key
+
+  createdAt DateTime @default(now())
+
+  thread          Thread             @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  mailAccount     MailAccount        @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
+  attachments     Attachment[]
+  classification  AiClassification?
+  translations    Translation[]
+
+  @@unique([mailAccountId, providerMessageId])
+  @@index([threadId, sentAt])
+  @@index([fromEmail])
+  @@index([contentHash])
+}
+
+model Attachment {
+  id                 String  @id @default(cuid())
+  messageId          String
+  providerAttachmentId String?
+  filename           String
+  mimeType           String
+  sizeBytes          Int
+  isInline           Boolean @default(false)
+  riskFlag           String? // "executable" | "macro" | "archive" | null
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// AI outputs — all cached by contentHash
+// ─────────────────────────────────────────────────────────────
+
+model AiSummary {
+  id          String   @id @default(cuid())
+  threadId    String
+  contentHash String   // hash of the concatenated thread at summarization time
+  model       String
+  headline    String   @db.Text
+  summary     String   @db.Text
+  keyPoints   Json     // string[]
+  actionItems Json     // [{ text, owner, dueDate? }]
+  createdAt   DateTime @default(now())
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, contentHash])
+  @@index([threadId])
+}
+
+enum ThreatLevel {
+  UNKNOWN
+  SAFE
+  SUSPICIOUS
+  PHISHING
+  SPAM
+}
+
+model AiClassification {
+  id        String @id @default(cuid())
+  messageId String @unique
+
+  category      Category
+  priority      Priority
+  priorityScore Int
+  needsReply    Boolean
+  language      String
+  confidence    Float
+
+  threatLevel   ThreatLevel
+  threatScore   Int    // 0-100
+  threatReasons Json   // string[] shown to the user
+  ruleSignals   Json   // deterministic layer-1/2 findings, pre-LLM
+
+  model       String
+  contentHash String
+  createdAt   DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([contentHash])
+}
+
+enum ReplyTone {
+  PROFESSIONAL
+  FRIENDLY
+  CONCISE
+  FORMAL
+  APOLOGETIC
+  ENTHUSIASTIC
+}
+
+model ReplyDraft {
+  id        String    @id @default(cuid())
+  threadId  String
+  tone      ReplyTone
+  body      String    @db.Text
+  editedBody String?  @db.Text
+  wasUsed   Boolean   @default(false) // feedback signal for prompt tuning
+  model     String
+  createdAt DateTime  @default(now())
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+}
+
+model Translation {
+  id             String   @id @default(cuid())
+  messageId      String
+  targetLang     String
+  translatedText String   @db.Text
+  sourceLang     String?
+  contentHash    String
+  model          String
+  createdAt      DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, targetLang])
+}
+
+/// Extracted from the user's own sent mail during backfill.
+/// Injected into every reply/compose prompt — the main quality lever.
+model UserWritingStyle {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  greeting       String?
+  signOff        String?
+  formality      String? // "casual" | "neutral" | "formal"
+  avgSentenceLen Int?
+  usesEmoji      Boolean  @default(false)
+  descriptor     String?  @db.Text // free-form style summary for the prompt
+  sampleCount    Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AiUsage {
+  id           String   @id @default(cuid())
+  userId       String
+  feature      String // "summarize" | "classify" | "reply" | "compose" | "translate" | "phishing"
+  model        String
+  inputTokens  Int
+  outputTokens Int
+  cachedTokens Int      @default(0)
+  costUsd      Decimal  @db.Decimal(10, 6)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scheduling & follow-ups
+// ─────────────────────────────────────────────────────────────
+
+enum ScheduleStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+model ScheduledEmail {
+  id            String @id @default(cuid())
+  userId        String
+  mailAccountId String
+  threadId      String?
+
+  to      String[]
+  cc      String[]
+  bcc     String[]
+  subject String   @db.Text
+  bodyHtml String  @db.Text
+  bodyText String? @db.Text
+
+  sendAt   DateTime
+  timezone String
+
+  status            ScheduleStatus @default(SCHEDULED)
+  idempotencyKey    String         @unique
+  attempts          Int            @default(0)
+  lastError         String?        @db.Text
+  sentAt            DateTime?
+  providerMessageId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mailAccount MailAccount @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
+  thread      Thread?     @relation(fields: [threadId], references: [id], onDelete: SetNull)
+
+  @@index([status, sendAt]) // sweeper query
+  @@index([userId, sendAt])
+}
+
+enum ReminderStatus {
+  PENDING
+  TRIGGERED
+  RESOLVED
+  SNOOZED
+  DISMISSED
+}
+
+model FollowUpReminder {
+  id       String @id @default(cuid())
+  userId   String
+  threadId String
+
+  /// the outbound message we're waiting on a reply to
+  watchedMessageId String
+  reason           String?        @db.Text
+  dueAt            DateTime
+  snoozedUntil     DateTime?
+  status           ReminderStatus @default(PENDING)
+  resolvedAt       DateTime?
+
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([status, dueAt])
+  @@index([userId, status])
+}
+
+model UserSettings {
+  id     String @id @default(cuid())
+  userId String @unique
+
+  aiEnabled          Boolean @default(true)
+  autoSummarize      Boolean @default(true)
+  autoCategorize     Boolean @default(true)
+  phishingProtection Boolean @default(true)
+  defaultTone        ReplyTone @default(PROFESSIONAL)
+  translationLang    String?
+  followUpDays       Int     @default(3)
+  dailyAiCallCap     Int     @default(500)
+  storeFullBodies    Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
