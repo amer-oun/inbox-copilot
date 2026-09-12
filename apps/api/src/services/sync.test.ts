@@ -48,11 +48,15 @@ vi.mock("@inbox-copilot/db", () => ({
 
 const getJob = vi.hoisted(() => vi.fn());
 const add = vi.hoisted(() => vi.fn());
+/** Enrichment is queued after each page commits; §5's ai.enrich pipeline. */
+const enrichAddBulk = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/queues.js", () => ({
   syncBackfillQueue: () => ({ getJob, add }),
   backfillJobId: (id: string) => `backfill-${id}`,
-  QUEUE_NAMES: { syncBackfill: "sync.backfill" },
+  aiEnrichQueue: () => ({ addBulk: enrichAddBulk }),
+  aiEnrichJobId: (id: string) => `enrich-${id}`,
+  QUEUE_NAMES: { syncBackfill: "sync.backfill", aiEnrich: "ai.enrich" },
 }));
 
 const listThreadIds = vi.hoisted(() => vi.fn());
@@ -186,10 +190,46 @@ describe("runBackfill", () => {
     messageUpsert.mockReset().mockResolvedValue({ id: "message-row-1" });
     attachmentDeleteMany.mockReset().mockResolvedValue({ count: 0 });
     attachmentCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    enrichAddBulk.mockReset().mockResolvedValue([]);
     stubTransaction();
   });
 
   const job = { userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID, windowDays: 90 };
+
+  it("queues ai enrichment for the messages a page wrote", async () => {
+    listThreadIds.mockResolvedValue({ items: ["t1"], nextPageToken: null });
+
+    await runBackfill(job);
+
+    expect(enrichAddBulk).toHaveBeenCalledTimes(1);
+    const queued = enrichAddBulk.mock.calls[0]?.[0] as { data: { messageId: string } }[];
+    expect(queued).toHaveLength(2);
+    expect(queued[0]?.data).toMatchObject({
+      messageId: "message-row-1",
+      mailAccountId: MAIL_ACCOUNT_ID,
+      userId: USER_ID,
+    });
+  });
+
+  it("queues nothing for a page whose transaction failed", async () => {
+    // Enrichment must never be pointed at rows that were not committed.
+    listThreadIds.mockResolvedValue({ items: ["t1"], nextPageToken: null });
+    transaction.mockRejectedValue(new Error("deadlock"));
+
+    await expect(runBackfill(job)).rejects.toThrow("deadlock");
+    expect(enrichAddBulk).not.toHaveBeenCalled();
+  });
+
+  it("queues per page rather than once at the end", async () => {
+    // A long backfill should start enriching while it is still paging.
+    listThreadIds
+      .mockResolvedValueOnce({ items: ["t1"], nextPageToken: "page-2" })
+      .mockResolvedValueOnce({ items: ["t2"], nextPageToken: null });
+
+    await runBackfill(job);
+
+    expect(enrichAddBulk).toHaveBeenCalledTimes(2);
+  });
 
   it("pages until the provider reports no next page", async () => {
     listThreadIds
@@ -521,7 +561,8 @@ describe("persistThread", () => {
   it("upserts each message on (mailAccountId, providerMessageId)", async () => {
     const written = await persist();
 
-    expect(written).toBe(2);
+    // The ids, not a count: the caller queues enrichment for exactly these rows.
+    expect(written).toEqual(["message-row-1", "message-row-1"]);
     expect(messageUpsert).toHaveBeenCalledTimes(2);
     expect(messageUpsert.mock.calls[0]?.[0]).toMatchObject({
       where: {

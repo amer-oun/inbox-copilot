@@ -148,16 +148,26 @@ describe("threadForPrompt", () => {
   });
 
   it("drops the oldest messages when over the thread budget", () => {
-    // A summary missing how a thread started is imperfect; one missing where it
-    // stands is wrong. So the newest survive.
-    const big = "x".repeat(MAX_THREAD_CHARS / 2);
-    const blocks = threadForPrompt(
-      [msg({ bodyText: `oldest ${big}` }), msg({ bodyText: `middle ${big}` }), msg({ bodyText: `newest ${big}` })],
-      "me@x.example",
+    /*
+     * A summary missing how a thread started is imperfect; one missing where it
+     * stands is wrong. So the newest survive.
+     *
+     * Note the per-message cap applies first: each body is already truncated to
+     * MAX_BODY_CHARS, so the thread budget only bites once there are more messages
+     * than MAX_THREAD_CHARS / MAX_BODY_CHARS of them — four, here.
+     */
+    const big = "x".repeat(MAX_BODY_CHARS);
+    const messages = ["oldest", "second", "third", "fourth", "newest"].map((label) =>
+      msg({ bodyText: `${label} ${big}` }),
     );
 
-    expect(blocks.length).toBeLessThan(3);
+    const blocks = threadForPrompt(messages, "me@x.example");
+
+    expect(blocks.length).toBeLessThan(messages.length);
     expect(blocks.at(-1)?.body.startsWith("newest")).toBe(true);
+    expect(blocks.reduce((sum, block) => sum + block.body.length, 0)).toBeLessThanOrEqual(
+      MAX_THREAD_CHARS,
+    );
   });
 
   it("always keeps at least the newest message, even if it alone is over budget", () => {

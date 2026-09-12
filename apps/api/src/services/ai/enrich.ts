@@ -237,6 +237,10 @@ export async function runEnrich(
  * starts before the rows exist would read nothing and fail, and enqueueing inside
  * the transaction would publish work that a rollback then invalidates.
  *
+ * Returns the number of jobs *submitted*, which is not always the number added:
+ * BullMQ returns a job object for an id that already exists, so a re-enqueue of the
+ * same messages collapses onto the queued jobs and still counts here.
+ *
  * Failures here are logged, never thrown. A backfill that has correctly stored a
  * page of mail must not be failed because Redis hiccuped on the follow-up work —
  * the messages are on disk, and phase 5's sweep can find what has no

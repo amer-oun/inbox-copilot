@@ -64,20 +64,22 @@ export const MODELS = {
 - Server Components by default in `apps/web`; `"use client"` only where interaction requires it.
 
 ## Current phase
-> Phase 2 — Gmail read: DONE. `MailProvider` port (`providers/mailProvider.ts`) with a
-> Gmail implementation (`providers/gmail/`, the only place `googleapis` is imported):
-> getProfile, listThreadIds, getThread, getAttachment, syncDelta via `history.list`.
-> `gmail/map.ts` normalizes the MIME tree, addresses, Authentication-Results and
-> attachments; contentHash = sha256 of the normalized plain text. BullMQ `sync.backfill`
-> queue + `src/worker.ts` entrypoint: 90-day window, 50 threads per batch, idempotent
-> upserts, cursor advanced only after commit, PENDING → BACKFILLING → ACTIVE.
-> Rate limiting: a per-mailbox token bucket in quota units (`lib/rateLimiter.ts`,
-> 200 units/sec of Gmail's 250) paces every call — that is the primary defense, with
-> retry as fallback (floor 1s, ceiling 30s, jitter only ever adds). Two concurrent
-> thread fetches; BullMQ retries a job 60s apart. A failed or cancelled job aborts its
-> in-flight requests, and resumes from a checkpoint (`backfillCursor` +
-> `backfillPageToken`) instead of restarting.
-> `POST /mail-accounts/:id/sync` and `GET /mail-accounts/:id/sync-status`.
-> Not yet: sendMessage/createDraft/modifyLabels (phase 6), watch (phase 7), Outlook
-> (phase 8) — all throw from behind the port.
-> Next: Phase 3 — inbox UI. Update this line as we progress.
+> Phase 4 — AI core: DONE. `services/ai/` is the only path to a model.
+> `models.ts` pins model ids and prices (Haiku 4.5 classifies, Sonnet 5 summarizes);
+> `prompts.ts` is the §7 boundary — email content only ever reaches the model inside
+> `<untrusted_email>` in a user turn, delimiters in content are defanged, and the
+> system prompt comes from a registry callers cannot pass a string into.
+> `client.ts` offers exactly one data-returning tool with `tool_choice` pinned and
+> parses the reply by validating the tool input against a Zod schema in
+> `packages/shared/src/schemas/ai.ts` — no prose fallback. `cache.ts` checks
+> `contentHash` in `AiClassification`/`AiSummary` before every call; `usage.ts`
+> writes `AiUsage` (tokens + cost) and enforces `UserSettings.dailyAiCallCap` in a
+> UTC window. `classify.ts` returns category/priority/priorityScore/needsReply/
+> language, with the score deciding the band when the model contradicts itself;
+> `summarize.ts` runs for threads of 3+ messages or bodies over 1500 chars.
+> `enrich.ts` + the BullMQ `ai.enrich` queue process each new message after sync and
+> denormalize onto `Thread`. Threat fields stay UNKNOWN: §6 is deterministic-first
+> and lands in phase 9.
+> Next: Phase 5 — categorization UI, priority scoring, Batch API backfill
+> enrichment (which is also what sweeps up messages skipped by a spent cap).
+> Update this line as we progress.
