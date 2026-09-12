@@ -90,6 +90,24 @@ export class InvalidGrantError extends AppError {
   readonly code = "INVALID_GRANT";
 }
 
+/**
+ * The user's daily AI call cap is spent (`UserSettings.dailyAiCallCap`).
+ *
+ * Not retryable within the window, so the enrich worker records it and stops rather
+ * than burning attempts: the cap exists to bound spend, and a retry loop against it
+ * would be a loop that never succeeds.
+ */
+export class AiCapExceededError extends AppError {
+  readonly statusCode = 429;
+  readonly code = "AI_CAP_EXCEEDED";
+}
+
+/** The user turned AI features off (`UserSettings.aiEnabled`). */
+export class AiDisabledError extends AppError {
+  readonly statusCode = 409;
+  readonly code = "AI_DISABLED";
+}
+
 export function isAppError(error: unknown): error is AppError {
   return error instanceof AppError;
 }

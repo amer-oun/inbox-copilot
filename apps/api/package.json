@@ -17,6 +17,7 @@
     "start:worker": "node dist/worker.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
     "@inbox-copilot/db": "workspace:*",
     "@inbox-copilot/shared": "workspace:*",
     "bullmq": "^6.3.4",

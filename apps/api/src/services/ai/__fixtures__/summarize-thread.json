@@ -1,0 +1,42 @@
+{
+  "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01A09q90qw90lq917835lq9",
+      "name": "record_summary",
+      "input": {
+        "headline": "Invoice 4471 disputed; Dana awaiting a revised PO before paying",
+        "summary": "Dana at Northwind flagged that invoice 4471 bills 14 licences against a PO for 12. Sam agreed the PO is the correct figure and said a revised invoice would follow. Dana will hold payment until it arrives, and the 30-day term restarts from the revised invoice date.",
+        "keyPoints": [
+          "Invoice 4471 bills 14 licences; PO NW-2291 covers 12.",
+          "Sam accepted the PO figure as correct.",
+          "Payment is on hold pending a revised invoice.",
+          "Net-30 restarts from the revised invoice date."
+        ],
+        "actionItems": [
+          {
+            "text": "Issue a revised invoice for 12 licences",
+            "owner": "user",
+            "dueDate": "2026-09-16"
+          },
+          {
+            "text": "Release payment once the revised invoice arrives",
+            "owner": "Dana Whitfield"
+          }
+        ]
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 4310,
+    "output_tokens": 288,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

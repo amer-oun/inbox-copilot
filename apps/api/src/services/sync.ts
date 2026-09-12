@@ -13,6 +13,7 @@ import {
   syncBackfillQueue,
   type BackfillJob,
 } from "../lib/queues.js";
+import { enqueueEnrichment } from "./ai/enrich.js";
 import { fetchThreads } from "../providers/gmail/client.js";
 import { mailProviderFor } from "../providers/registry.js";
 import { threadParticipants } from "../providers/gmail/map.js";
@@ -300,12 +301,15 @@ export async function runBackfill(
       const threads = await fetchThreads(provider, page.items, signal);
       progress.pagesRead += 1;
 
+      const writtenMessageIds: string[] = [];
+
       for (const thread of threads) {
         if (thread.messages.length === 0) continue;
 
         const written = await persistThread(db, mailAccountId, thread);
         progress.threadsProcessed += 1;
-        progress.messagesWritten += written;
+        progress.messagesWritten += written.length;
+        writtenMessageIds.push(...written);
 
         const first = thread.messages[0]?.sentAt ?? null;
         if (first && (oldestSeen === null || first < oldestSeen)) oldestSeen = first;
@@ -324,6 +328,17 @@ export async function runBackfill(
           backfillPageToken: pageToken ?? null,
           ...(oldestSeen === null ? {} : { backfilledUntil: oldestSeen }),
         },
+      });
+
+      /*
+       * Enrichment is queued after the page's transactions have committed, for the
+       * same reason the cursor moves after them: a consumer must never be pointed at
+       * rows that are not there yet.
+       */
+      await enqueueEnrichment({
+        userId: job.userId,
+        mailAccountId,
+        messageIds: writtenMessageIds,
       });
 
       await hooks.onProgress?.({ ...progress });
@@ -390,7 +405,7 @@ export async function persistThread(
   db: ReturnType<typeof dbForUser>,
   mailAccountId: string,
   thread: RawThread,
-): Promise<number> {
+): Promise<string[]> {
   const messages = thread.messages;
   const last = messages[messages.length - 1] as RawMessage;
   const first = messages[0] as RawMessage;
@@ -413,6 +428,8 @@ export async function persistThread(
   };
 
   return db.$transaction(async (tx) => {
+    const messageIds: string[] = [];
+
     const row = await tx.thread.upsert({
       where: {
         mailAccountId_providerThreadId: {
@@ -454,7 +471,7 @@ export async function persistThread(
         contentHash: message.contentHash,
       };
 
-      const saved = await tx.message.upsert({
+      const saved: { id: string } = await tx.message.upsert({
         where: {
           mailAccountId_providerMessageId: {
             mailAccountId,
@@ -465,6 +482,8 @@ export async function persistThread(
         update: messageFields,
         select: { id: true },
       });
+
+      messageIds.push(saved.id);
 
       // Attachment metadata has no natural key of its own, so it is replaced
       // wholesale — cheaper than diffing, and idempotent either way.
@@ -484,7 +503,8 @@ export async function persistThread(
       }
     }
 
-    return messages.length;
+    // The ids, not the count: the caller queues enrichment for exactly these rows.
+    return messageIds;
   });
 }
 

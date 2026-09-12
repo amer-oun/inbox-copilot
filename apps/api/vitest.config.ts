@@ -36,6 +36,9 @@ export default defineConfig({
       MICROSOFT_CLIENT_ID: "test-microsoft-client-id",
       MICROSOFT_CLIENT_SECRET: "test-microsoft-client-secret",
       MICROSOFT_TENANT_ID: "common",
+      // Present so the AI client constructs; the SDK itself is always mocked, so
+      // no test can reach the real API with it (a fixture is the only response).
+      ANTHROPIC_API_KEY: "test-anthropic-key-not-a-real-credential",
     },
   },
 });

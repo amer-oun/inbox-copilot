@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { htmlToText } from "../../lib/html.js";
 import type { gmail_v1 } from "googleapis";
 import type {
   AuthVerdict,
@@ -235,21 +236,8 @@ export function computeContentHash(bodyText: string | null, fallback: string): s
   return createHash("sha256").update(basis, "utf8").digest("hex");
 }
 
-/** Crude HTML → text, used only when a message has no text/plain part at all. */
-export function htmlToText(html: string): string {
-  return html
-    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/[ \t]{2,}/g, " ");
-}
+/** Re-exported from lib/html.ts, where both the sync and AI layers can reach it. */
+export { htmlToText } from "../../lib/html.js";
 
 const HEADERS_WORTH_KEEPING = new Set([
   "message-id",

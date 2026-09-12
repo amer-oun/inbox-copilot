@@ -95,6 +95,11 @@ interface GoogleApiErrorish {
   code?: number | string;
   status?: number;
   message?: string;
+  /**
+   * Anthropic's `APIError` hangs headers off the error itself rather than off a
+   * `response`. Same job, different shape, so both are checked.
+   */
+  headers?: unknown;
   response?: {
     status?: number;
     /**
@@ -260,7 +265,10 @@ export function isRetryable(error: unknown): boolean {
 
 /** Reads `Retry-After` in either of its RFC forms: delta-seconds or HTTP-date. */
 export function retryAfterMs(error: unknown, now: number = Date.now()): number | null {
-  const value = headerValue(asErrorish(error).response?.headers, "retry-after");
+  const e = asErrorish(error);
+  const value =
+    headerValue(e.response?.headers, "retry-after") ??
+    headerValue(e.headers, "retry-after");
   if (value === undefined) return null;
 
   const seconds = Number(value);

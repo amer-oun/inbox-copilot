@@ -58,6 +58,14 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
+  /**
+   * Anthropic API key for the AI layer. Empty is allowed at boot for the same
+   * reason as the provider credentials: the API must start and serve /health on a
+   * machine with no AI configured. `services/ai/client.ts` refuses the call with a
+   * clear error instead of failing mysteriously at the first classification.
+   */
+  ANTHROPIC_API_KEY: z.string().default(""),
+
   MICROSOFT_CLIENT_ID: z.string().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().default(""),
   /** "common" for multi-tenant + personal accounts; a GUID to lock to one tenant. */

@@ -3,13 +3,16 @@ import { disconnectDatabase } from "@inbox-copilot/db";
 import { logger } from "./lib/logger.js";
 import { env } from "./lib/env.js";
 import {
+  aiEnrichJobSchema,
   backfillJobSchema,
   bullConnection,
   closeQueues,
   QUEUE_NAMES,
+  type AiEnrichJob,
   type BackfillJob,
 } from "./lib/queues.js";
 import { runBackfill } from "./services/sync.js";
+import { runEnrich } from "./services/ai/enrich.js";
 import { MailAccountRevokedError, NotFoundError } from "./lib/errors.js";
 import { ConflictError } from "./lib/errors.js";
 
@@ -26,6 +29,13 @@ import { ConflictError } from "./lib/errors.js";
  * bucket, so this is a multiplier on Gmail quota and not just on CPU.
  */
 const WORKER_CONCURRENCY = 2;
+
+/**
+ * Enrichment runs wider than sync: an AI call is latency, not local quota, and each
+ * job is one message rather than a whole mailbox. The real bound on this work is the
+ * per-user daily cap, checked inside every call (services/ai/usage.ts).
+ */
+const ENRICH_CONCURRENCY = 5;
 
 /**
  * In-flight abort controllers, keyed by job id.
@@ -105,10 +115,73 @@ async function processBackfill(job: Job<BackfillJob>): Promise<void> {
   }
 }
 
+/**
+ * Enrichment of one message (§5).
+ *
+ * A cap or a disabled setting comes back in `skipped` rather than as a throw, so
+ * those complete rather than retry — see the note in services/ai/enrich.ts.
+ */
+async function processEnrich(job: Job<AiEnrichJob>): Promise<void> {
+  const payload = aiEnrichJobSchema.parse(job.data);
+  const log = logger.child({
+    userId: payload.userId,
+    mailAccountId: payload.mailAccountId,
+    messageId: payload.messageId,
+  });
+
+  const controller = new AbortController();
+  const key = `enrich-${job.id ?? payload.messageId}`;
+  inFlight.set(key, controller);
+
+  try {
+    const result = await runEnrich(payload, { signal: controller.signal });
+    if (result.skipped.length > 0) {
+      log.debug({ jobId: job.id, skipped: result.skipped }, "enrich skipped work");
+    }
+  } catch (error) {
+    if (isPermanent(error)) {
+      const message = error instanceof Error ? error.message : "permanent failure";
+      log.warn({ jobId: job.id, err: error }, "enrich cannot be retried");
+      throw new UnrecoverableError(message);
+    }
+    throw error;
+  } finally {
+    controller.abort();
+    inFlight.delete(key);
+  }
+}
+
 const worker = new Worker<BackfillJob>(QUEUE_NAMES.syncBackfill, processBackfill, {
   connection: bullConnection,
   concurrency: WORKER_CONCURRENCY,
   limiter: { max: RATE_LIMIT.max, duration: RATE_LIMIT.duration },
+});
+
+const enrichWorker = new Worker<AiEnrichJob>(QUEUE_NAMES.aiEnrich, processEnrich, {
+  connection: bullConnection,
+  concurrency: ENRICH_CONCURRENCY,
+});
+
+enrichWorker.on("failed", (job, error) => {
+  abortJob(`enrich-${job?.id}`, "job failed");
+  logger.error(
+    {
+      queue: QUEUE_NAMES.aiEnrich,
+      jobId: job?.id,
+      attempts: job?.attemptsMade,
+      err: error,
+    },
+    "job failed",
+  );
+});
+
+enrichWorker.on("stalled", (jobId) => {
+  abortJob(`enrich-${jobId}`, "job stalled");
+  logger.warn({ queue: QUEUE_NAMES.aiEnrich, jobId }, "job stalled");
+});
+
+enrichWorker.on("error", (error) => {
+  logger.warn({ err: error }, "enrich worker error");
 });
 
 worker.on("failed", (job, error) => {
@@ -137,7 +210,11 @@ worker.on("error", (error) => {
 });
 
 logger.info(
-  { queue: QUEUE_NAMES.syncBackfill, concurrency: WORKER_CONCURRENCY, env: env.NODE_ENV },
+  {
+    queues: [QUEUE_NAMES.syncBackfill, QUEUE_NAMES.aiEnrich],
+    concurrency: { backfill: WORKER_CONCURRENCY, enrich: ENRICH_CONCURRENCY },
+    env: env.NODE_ENV,
+  },
   "worker listening",
 );
 
@@ -147,7 +224,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   for (const [jobId] of inFlight) abortJob(jobId, "worker shutting down");
   // `close()` waits for in-flight jobs so a deploy does not abandon a backfill
   // halfway through a page.
-  await worker.close();
+  await Promise.all([worker.close(), enrichWorker.close()]);
   await Promise.allSettled([closeQueues(), disconnectDatabase()]);
   process.exit(0);
 }
