@@ -42,13 +42,20 @@ export const bullConnection: ConnectionOptions = {
  *
  * `attempts` + exponential backoff is the outer ring around the per-call retries in
  * `lib/retry.ts`: that one survives a rate limit inside a job, this one survives
- * the job dying. Completed jobs are kept briefly so `sync-status` can still see the
- * last outcome; failures are kept much longer because they are the ones worth
- * reading.
+ * the job dying.
+ *
+ * The 60-second base is deliberate. A backfill that failed on rate limiting needs the
+ * quota window to actually recover; retrying a whole mailbox seconds later just
+ * re-fills the bucket with the same requests. The curve is 60s, 2m, 4m, 8m — and the
+ * attempt count stays at 5, because the fix for rate limiting is fewer requests, not
+ * more attempts.
+ *
+ * Completed jobs are kept briefly so `sync-status` can still see the last outcome;
+ * failures are kept much longer because they are the ones worth reading.
  */
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
   attempts: 5,
-  backoff: { type: "exponential", delay: 5_000 },
+  backoff: { type: "exponential", delay: 60_000 },
   removeOnComplete: { age: 3_600, count: 100 },
   removeOnFail: { age: 7 * 24 * 3_600 },
 };

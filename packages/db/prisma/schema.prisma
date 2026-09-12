@@ -125,6 +125,14 @@ model MailAccount {
   lastSyncedAt    DateTime?
   backfilledUntil DateTime?
 
+  /// In-progress backfill checkpoint, so a retried job resumes instead of
+  /// restarting. `backfillPageToken` is the next page to read; `backfillCursor` is
+  /// the history pointer captured when the run began — a resume must keep the
+  /// original, because re-reading it later would skip everything that arrived
+  /// during the attempt that failed. Both are cleared when the backfill completes.
+  backfillPageToken String?  @db.Text
+  backfillCursor    String?
+
   // push notification subscription
   watchResourceId String?
   watchExpiresAt  DateTime?

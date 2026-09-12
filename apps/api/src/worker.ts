@@ -21,11 +21,30 @@ import { ConflictError } from "./lib/errors.js";
  */
 
 /**
- * Mailboxes processed at once. Deliberately small: each job already fans out to
- * five concurrent `threads.get` calls, so this is a multiplier on Gmail quota, not
- * just on CPU.
+ * Mailboxes processed at once. Deliberately small: each job fans out to two
+ * concurrent `threads.get` calls, and all of them draw on the same per-mailbox quota
+ * bucket, so this is a multiplier on Gmail quota and not just on CPU.
  */
 const WORKER_CONCURRENCY = 2;
+
+/**
+ * In-flight abort controllers, keyed by job id.
+ *
+ * BullMQ abandons a failed attempt but does not cancel the work it started. Without
+ * this, a run that failed on rate limiting keeps its `threads.get` calls in flight
+ * while the retry begins — the attempts stack, and the second attempt is rate-limited
+ * by the first. Aborting on the way out is what keeps one attempt running at a time.
+ */
+const inFlight = new Map<string, AbortController>();
+
+function abortJob(jobId: string | undefined, reason: string): void {
+  if (jobId === undefined) return;
+  const controller = inFlight.get(jobId);
+  if (!controller || controller.signal.aborted) return;
+
+  logger.warn({ jobId, reason }, "aborting in-flight provider calls");
+  controller.abort();
+}
 
 /**
  * A second ceiling, in case many mailboxes are queued at once: no more than this
@@ -57,8 +76,12 @@ async function processBackfill(job: Job<BackfillJob>): Promise<void> {
 
   log.info({ jobId: job.id, attempt: job.attemptsMade + 1 }, "backfill started");
 
+  const controller = new AbortController();
+  if (job.id !== undefined) inFlight.set(job.id, controller);
+
   try {
     const progress = await runBackfill(payload, {
+      signal: controller.signal,
       onProgress: async (current) => {
         await job.updateProgress(current);
       },
@@ -73,6 +96,12 @@ async function processBackfill(job: Job<BackfillJob>): Promise<void> {
       throw new UnrecoverableError(message);
     }
     throw error;
+  } finally {
+    // Whatever happened, nothing from this attempt may still be talking to Gmail:
+    // the next attempt is about to, and the checkpoint means it resumes rather than
+    // repeats. Cancelling here is also what frees the queued quota waiters.
+    controller.abort();
+    if (job.id !== undefined) inFlight.delete(job.id);
   }
 }
 
@@ -83,10 +112,23 @@ const worker = new Worker<BackfillJob>(QUEUE_NAMES.syncBackfill, processBackfill
 });
 
 worker.on("failed", (job, error) => {
+  // Belt and braces with the `finally` above: a job that BullMQ fails out from under
+  // us (a stall, a lost lock) never reaches that block.
+  abortJob(job?.id, "job failed");
   logger.error(
-    { queue: QUEUE_NAMES.syncBackfill, jobId: job?.id, attempts: job?.attemptsMade, err: error },
+    {
+      queue: QUEUE_NAMES.syncBackfill,
+      jobId: job?.id,
+      attempts: job?.attemptsMade,
+      err: error,
+    },
     "job failed",
   );
+});
+
+worker.on("stalled", (jobId) => {
+  abortJob(jobId, "job stalled");
+  logger.warn({ queue: QUEUE_NAMES.syncBackfill, jobId }, "job stalled");
 });
 
 worker.on("error", (error) => {
@@ -101,6 +143,8 @@ logger.info(
 
 async function shutdown(signal: NodeJS.Signals): Promise<void> {
   logger.info({ signal }, "worker shutting down");
+  // Stop making requests immediately; `close()` below waits for the jobs to unwind.
+  for (const [jobId] of inFlight) abortJob(jobId, "worker shutting down");
   // `close()` waits for in-flight jobs so a deploy does not abandon a backfill
   // halfway through a page.
   await worker.close();

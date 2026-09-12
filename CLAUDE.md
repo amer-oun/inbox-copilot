@@ -71,7 +71,12 @@ export const MODELS = {
 > attachments; contentHash = sha256 of the normalized plain text. BullMQ `sync.backfill`
 > queue + `src/worker.ts` entrypoint: 90-day window, 50 threads per batch, idempotent
 > upserts, cursor advanced only after commit, PENDING → BACKFILLING → ACTIVE.
-> Backoff with jitter honours Retry-After; concurrency capped at 5 thread fetches.
+> Rate limiting: a per-mailbox token bucket in quota units (`lib/rateLimiter.ts`,
+> 200 units/sec of Gmail's 250) paces every call — that is the primary defense, with
+> retry as fallback (floor 1s, ceiling 30s, jitter only ever adds). Two concurrent
+> thread fetches; BullMQ retries a job 60s apart. A failed or cancelled job aborts its
+> in-flight requests, and resumes from a checkpoint (`backfillCursor` +
+> `backfillPageToken`) instead of restarting.
 > `POST /mail-accounts/:id/sync` and `GET /mail-accounts/:id/sync-status`.
 > Not yet: sendMessage/createDraft/modifyLabels (phase 6), watch (phase 7), Outlook
 > (phase 8) — all throw from behind the port.

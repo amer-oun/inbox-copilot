@@ -18,6 +18,12 @@ const setCredentials = vi.hoisted(() => vi.fn());
 
 vi.mock("../tokenManager.js", () => ({ getAccessToken }));
 
+const acquireGmailQuota = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/rateLimiter.js", () => ({
+  acquireGmailQuota,
+  GMAIL_QUOTA_UNITS: {},
+}));
+
 vi.mock("googleapis", () => ({
   google: {
     auth: {
@@ -53,6 +59,7 @@ describe("GmailProvider", () => {
     getProfileFn.mockReset();
     attachmentsGet.mockReset();
     setCredentials.mockReset();
+    acquireGmailQuota.mockReset().mockResolvedValue(undefined);
   });
 
   describe("authentication", () => {
@@ -111,6 +118,7 @@ describe("GmailProvider", () => {
           includeSpamTrash: false,
           q: `after:${Math.floor(after.getTime() / 1000)}`,
         }),
+        {},
       );
     });
 
@@ -134,7 +142,10 @@ describe("GmailProvider", () => {
       threadsList.mockResolvedValue({ data: { threads: [] } });
 
       await createGmailProvider(CONTEXT).listThreadIds({ limit: 5_000 });
-      expect(threadsList).toHaveBeenCalledWith(expect.objectContaining({ maxResults: 500 }));
+      expect(threadsList).toHaveBeenCalledWith(
+        expect.objectContaining({ maxResults: 500 }),
+        {},
+      );
     });
   });
 
@@ -146,6 +157,7 @@ describe("GmailProvider", () => {
 
       expect(threadsGet).toHaveBeenCalledWith(
         expect.objectContaining({ userId: "me", id: "18f0a1b2c3d4e5f0", format: "full" }),
+        {},
       );
       expect(thread.messages).toHaveLength(2);
       expect(thread.messages[0]?.subject).toBe("Invoice 4471 for March");
@@ -188,6 +200,7 @@ describe("GmailProvider", () => {
 
       expect(historyListFn).toHaveBeenCalledWith(
         expect.objectContaining({ userId: "me", startHistoryId: "1000000" }),
+        {},
       );
       expect(result.cursor).toBe("1000500");
     });
@@ -260,6 +273,89 @@ describe("GmailProvider", () => {
 
       const result = await createGmailProvider(CONTEXT).syncDelta("1");
       expect(result.changes).toEqual([]);
+    });
+  });
+
+  describe("quota pacing", () => {
+    it("spends the method's quota before every call", async () => {
+      getProfileFn.mockResolvedValue({ data: { emailAddress: "p@e.test", historyId: "1" } });
+      threadsList.mockResolvedValue({ data: { threads: [] } });
+      threadsGet.mockResolvedValue({ data: invoiceThread });
+      const provider = createGmailProvider(CONTEXT);
+
+      await provider.getProfile();
+      await provider.listThreadIds({ limit: 50 });
+      await provider.getThread("t1");
+
+      // Pacing is the primary defense, so it happens on the way in — not after a
+      // rejection comes back.
+      expect(acquireGmailQuota.mock.calls.map((call) => call[1])).toEqual([
+        "users.getProfile",
+        "users.threads.list",
+        "users.threads.get",
+      ]);
+      expect(acquireGmailQuota.mock.calls.every((call) => call[0] === "mail_1")).toBe(true);
+    });
+
+    it("acquires before the request is made, not alongside it", async () => {
+      const order: string[] = [];
+      acquireGmailQuota.mockImplementation(async () => {
+        order.push("acquire");
+      });
+      getProfileFn.mockImplementation(async () => {
+        order.push("request");
+        return { data: { emailAddress: "p@e.test", historyId: "1" } };
+      });
+
+      await createGmailProvider(CONTEXT).getProfile();
+
+      expect(order).toEqual(["acquire", "request"]);
+    });
+
+    it("pays quota again for a retried call, because it is another request", async () => {
+      const rateLimited = Object.assign(new Error("rate limited"), {
+        response: { status: 429, headers: { "retry-after": "0" } },
+      });
+      threadsGet.mockRejectedValueOnce(rateLimited).mockResolvedValue({ data: invoiceThread });
+
+      await createGmailProvider(CONTEXT).getThread("t1");
+
+      expect(acquireGmailQuota).toHaveBeenCalledTimes(2);
+    }, 10_000);
+  });
+
+  describe("cancellation", () => {
+    it("passes the signal to Gaxios so an in-flight request can be dropped", async () => {
+      const controller = new AbortController();
+      threadsGet.mockResolvedValue({ data: invoiceThread });
+
+      await createGmailProvider({ ...CONTEXT, signal: controller.signal }).getThread("t1");
+
+      expect(threadsGet).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "t1" }),
+        { signal: controller.signal },
+      );
+    });
+
+    it("passes the signal to the quota wait, so a cancelled job stops queueing", async () => {
+      const controller = new AbortController();
+      getProfileFn.mockResolvedValue({ data: { emailAddress: "p@e.test", historyId: "1" } });
+
+      await createGmailProvider({ ...CONTEXT, signal: controller.signal }).getProfile();
+
+      expect(acquireGmailQuota).toHaveBeenCalledWith(
+        "mail_1",
+        "users.getProfile",
+        controller.signal,
+      );
+    });
+
+    it("omits request options entirely when there is no signal", async () => {
+      getProfileFn.mockResolvedValue({ data: { emailAddress: "p@e.test", historyId: "1" } });
+
+      await createGmailProvider(CONTEXT).getProfile();
+
+      expect(getProfileFn).toHaveBeenCalledWith({ userId: "me" }, {});
     });
   });
 

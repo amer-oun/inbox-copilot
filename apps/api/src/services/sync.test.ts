@@ -18,6 +18,8 @@ const threadCount = vi.hoisted(() => vi.fn());
 const messageCount = vi.hoisted(() => vi.fn());
 const transaction = vi.hoisted(() => vi.fn());
 const writes = vi.hoisted(() => [] as { field: string; value: unknown }[]);
+/** Each mailAccount.update() call as one group: lets a test assert "same write". */
+const updateGroups = vi.hoisted(() => [] as Record<string, unknown>[]);
 
 const threadUpsert = vi.hoisted(() => vi.fn());
 const messageUpsert = vi.hoisted(() => vi.fn());
@@ -33,6 +35,7 @@ vi.mock("@inbox-copilot/db", () => ({
         for (const [field, value] of Object.entries(args.data)) {
           writes.push({ field, value });
         }
+        updateGroups.push(args.data);
         return update(args);
       },
     },
@@ -56,13 +59,13 @@ const listThreadIds = vi.hoisted(() => vi.fn());
 const getThread = vi.hoisted(() => vi.fn());
 const getProfile = vi.hoisted(() => vi.fn());
 
+const providerContexts = vi.hoisted(() => [] as { signal?: AbortSignal }[]);
+
 vi.mock("../providers/registry.js", () => ({
-  mailProviderFor: () => ({
-    providerType: "GMAIL",
-    getProfile,
-    listThreadIds,
-    getThread,
-  }),
+  mailProviderFor: (_type: string, context: { signal?: AbortSignal }) => {
+    providerContexts.push(context);
+    return { providerType: "GMAIL", getProfile, listThreadIds, getThread };
+  },
 }));
 
 const { getSyncStatus, runBackfill, startBackfill, riskFlagFor, persistThread } = await import(
@@ -80,6 +83,8 @@ const MAILBOX = {
   emailAddress: "person@example.com",
   syncStatus: "PENDING",
   syncCursor: null,
+  backfillPageToken: null,
+  backfillCursor: null,
 };
 
 const THREAD = mapThread(invoiceThread as gmail_v1.Schema$Thread, {
@@ -104,6 +109,7 @@ function statusWrites(): unknown[] {
 describe("startBackfill", () => {
   beforeEach(() => {
     writes.length = 0;
+    updateGroups.length = 0;
     findFirst.mockReset().mockResolvedValue(MAILBOX);
     update.mockReset().mockResolvedValue({});
     getJob.mockReset().mockResolvedValue(null);
@@ -166,6 +172,7 @@ describe("startBackfill", () => {
 describe("runBackfill", () => {
   beforeEach(() => {
     writes.length = 0;
+    updateGroups.length = 0;
     findFirst.mockReset().mockResolvedValue(MAILBOX);
     update.mockReset().mockResolvedValue({});
     getProfile.mockReset().mockResolvedValue({
@@ -237,15 +244,19 @@ describe("runBackfill", () => {
 
     await runBackfill(job);
 
-    const cursorWriteIndex = writes.findIndex((write) => write.field === "syncCursor");
-    const activeWriteIndex = writes.findIndex(
-      (write) => write.field === "syncStatus" && write.value === "ACTIVE",
-    );
+    // The cursor moves exactly once, in the same update that flips to ACTIVE and
+    // clears the checkpoint — i.e. after every thread transaction has committed.
+    const cursorWrites = updateGroups.filter((data) => "syncCursor" in data);
+    expect(cursorWrites).toHaveLength(1);
+    expect(cursorWrites[0]).toMatchObject({
+      syncCursor: "555000",
+      syncStatus: "ACTIVE",
+      backfillCursor: null,
+      backfillPageToken: null,
+    });
 
-    expect(writes[cursorWriteIndex]?.value).toBe("555000");
-    // Same update as the ACTIVE transition, i.e. after every thread transaction.
-    expect(cursorWriteIndex).toBeGreaterThan(0);
-    expect(Math.abs(cursorWriteIndex - activeWriteIndex)).toBeLessThanOrEqual(3);
+    // And it is the last write of the run.
+    expect(updateGroups.at(-1)).toBe(cursorWrites[0]);
     expect(transaction).toHaveBeenCalled();
   });
 
@@ -303,6 +314,178 @@ describe("runBackfill", () => {
 
     expect(progress.threadsProcessed).toBe(0);
     expect(transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("runBackfill resumption", () => {
+  beforeEach(() => {
+    writes.length = 0;
+    updateGroups.length = 0;
+    update.mockReset().mockResolvedValue({});
+    getProfile.mockReset().mockResolvedValue({
+      emailAddress: "person@example.com",
+      providerAccountId: "person@example.com",
+      historyId: "555000",
+    });
+    listThreadIds.mockReset().mockResolvedValue({ items: [], nextPageToken: null });
+    getThread.mockReset().mockResolvedValue(THREAD);
+    threadUpsert.mockReset().mockResolvedValue({ id: "thread-row-1" });
+    messageUpsert.mockReset().mockResolvedValue({ id: "message-row-1" });
+    attachmentDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+    attachmentCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    stubTransaction();
+  });
+
+  const job = { userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID, windowDays: 90 };
+
+  it("checkpoints the history pointer and next page token when starting fresh", async () => {
+    findFirst.mockResolvedValue(MAILBOX);
+    listThreadIds
+      .mockResolvedValueOnce({ items: ["t1"], nextPageToken: "page-2" })
+      .mockResolvedValueOnce({ items: ["t2"], nextPageToken: null });
+
+    await runBackfill(job);
+
+    const cursorCheckpoint = writes.find((w) => w.field === "backfillCursor");
+    expect(cursorCheckpoint?.value).toBe("555000");
+    // The token stored after page one is the token for page two.
+    const tokens = writes.filter((w) => w.field === "backfillPageToken").map((w) => w.value);
+    expect(tokens).toContain("page-2");
+  });
+
+  it("resumes from the checkpoint without calling getProfile again", async () => {
+    // The whole point: a run that already wrote 50 threads must not start over.
+    findFirst.mockResolvedValue({
+      ...MAILBOX,
+      syncStatus: "ERROR",
+      backfillCursor: "555000",
+      backfillPageToken: "page-7",
+    });
+
+    await runBackfill(job);
+
+    expect(getProfile).not.toHaveBeenCalled();
+    expect(listThreadIds).toHaveBeenCalledWith(
+      expect.objectContaining({ pageToken: "page-7" }),
+    );
+  });
+
+  it("reuses the ORIGINAL history pointer on resume, not a fresh one", async () => {
+    // A fresh pointer would skip everything that arrived during the failed attempt.
+    findFirst.mockResolvedValue({
+      ...MAILBOX,
+      backfillCursor: "111000",
+      backfillPageToken: "page-3",
+    });
+    getProfile.mockResolvedValue({
+      emailAddress: "person@example.com",
+      providerAccountId: "person@example.com",
+      historyId: "999999",
+    });
+
+    await runBackfill(job);
+
+    const cursorWrite = writes.find((w) => w.field === "syncCursor");
+    expect(cursorWrite?.value).toBe("111000");
+  });
+
+  it("clears the checkpoint once the backfill completes", async () => {
+    findFirst.mockResolvedValue({
+      ...MAILBOX,
+      backfillCursor: "555000",
+      backfillPageToken: "page-9",
+    });
+
+    await runBackfill(job);
+
+    const finalTokenWrite = [...writes].reverse().find((w) => w.field === "backfillPageToken");
+    const finalCursorWrite = [...writes].reverse().find((w) => w.field === "backfillCursor");
+    expect(finalTokenWrite?.value).toBeNull();
+    expect(finalCursorWrite?.value).toBeNull();
+  });
+
+  it("keeps the checkpoint when a page fails, so the retry resumes", async () => {
+    findFirst.mockResolvedValue(MAILBOX);
+    listThreadIds
+      .mockResolvedValueOnce({ items: ["t1"], nextPageToken: "page-2" })
+      .mockRejectedValueOnce(new Error("rate limited"));
+
+    await expect(runBackfill(job)).rejects.toThrow("rate limited");
+
+    // The last checkpoint written is page two — retained, not cleared, so the retry
+    // starts there instead of re-reading page one.
+    const tokenWrites = writes.filter((w) => w.field === "backfillPageToken");
+    expect(tokenWrites.at(-1)?.value).toBe("page-2");
+    expect(updateGroups.some((data) => data["backfillCursor"] === null)).toBe(false);
+    expect(statusWrites()).toEqual(["BACKFILLING", "ERROR"]);
+  });
+});
+
+describe("runBackfill cancellation", () => {
+  beforeEach(() => {
+    writes.length = 0;
+    updateGroups.length = 0;
+    findFirst.mockReset().mockResolvedValue(MAILBOX);
+    update.mockReset().mockResolvedValue({});
+    getProfile.mockReset().mockResolvedValue({
+      emailAddress: "person@example.com",
+      providerAccountId: "person@example.com",
+      historyId: "555000",
+    });
+    getThread.mockReset().mockResolvedValue(THREAD);
+    listThreadIds.mockReset();
+    threadUpsert.mockReset().mockResolvedValue({ id: "thread-row-1" });
+    messageUpsert.mockReset().mockResolvedValue({ id: "message-row-1" });
+    attachmentDeleteMany.mockReset().mockResolvedValue({ count: 0 });
+    attachmentCreateMany.mockReset().mockResolvedValue({ count: 0 });
+    providerContexts.length = 0;
+    stubTransaction();
+  });
+
+  const job = { userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID, windowDays: 90 };
+
+  it("stops paging when the signal aborts", async () => {
+    const controller = new AbortController();
+    listThreadIds.mockImplementation(async () => {
+      controller.abort();
+      return { items: [], nextPageToken: "next-page" };
+    });
+
+    await expect(runBackfill(job, { signal: controller.signal })).rejects.toThrow(
+      /cancelled|aborted/i,
+    );
+    // One page attempted, then it stops rather than continuing beside the retry.
+    expect(listThreadIds).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start at all if the signal is already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    listThreadIds.mockResolvedValue({ items: [], nextPageToken: null });
+
+    await expect(runBackfill(job, { signal: controller.signal })).rejects.toThrow();
+    expect(listThreadIds).not.toHaveBeenCalled();
+  });
+
+  it("leaves a cancelled mailbox PENDING, not ERROR", async () => {
+    // Cancellation is not a failure of the mailbox: the retry is already scheduled.
+    const controller = new AbortController();
+    controller.abort();
+    listThreadIds.mockResolvedValue({ items: [], nextPageToken: null });
+
+    await expect(runBackfill(job, { signal: controller.signal })).rejects.toThrow();
+
+    expect(statusWrites()).toEqual(["BACKFILLING", "PENDING"]);
+    expect(writes.some((w) => w.field === "syncError" && w.value !== null)).toBe(false);
+  });
+
+  it("passes the signal to the provider it creates", async () => {
+    const controller = new AbortController();
+    listThreadIds.mockResolvedValue({ items: [], nextPageToken: null });
+
+    await runBackfill(job, { signal: controller.signal });
+
+    expect(providerContexts.at(-1)?.signal).toBe(controller.signal);
   });
 });
 

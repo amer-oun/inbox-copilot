@@ -2,39 +2,85 @@ import { logger } from "./logger.js";
 import { RateLimitError, UpstreamError } from "./errors.js";
 
 /**
- * Retry with exponential backoff and full jitter (§4 safety rails).
+ * Retry with exponential backoff and jitter — the *fallback* for rate limiting, not
+ * the strategy. Pacing is the strategy: every provider call passes through the token
+ * bucket in lib/rateLimiter.ts before it fires, so the limit should not be reached.
+ * Retry covers what pacing cannot predict: shared project quota, another client on
+ * the same mailbox, a quota change.
  *
- * Two rules that matter more than the curve:
+ * Three rules that matter more than the curve:
  *   1. `Retry-After` wins. When a provider tells us when to come back, guessing
  *      earlier just burns more quota and extends the block.
- *   2. Jitter is not decoration. A backfill fans out across many threads; without
- *      jitter every retry lands in the same millisecond and re-triggers the limit.
+ *   2. There is a floor. Jitter is a multiplier applied *on top of* the delay, never
+ *      a fraction of it — full jitter (`random() * delay`) produced 5ms retries,
+ *      which is not a backoff, it is the same request again.
+ *   3. Jitter still matters: a backfill fans out, and without it every retry in a
+ *      batch lands in the same millisecond and re-triggers the limit together.
  */
 
 export interface RetryOptions {
-  /** Total attempts including the first. */
+  /** Total attempts including the first. Raising this is not a rate-limit fix. */
   attempts?: number;
-  baseDelayMs?: number;
+  /** Floor: no wait, however computed, is ever shorter than this. */
+  minDelayMs?: number;
   maxDelayMs?: number;
   /** Ceiling for a provider-supplied Retry-After; longer waits belong to the queue. */
   maxRetryAfterMs?: number;
   /** Label for log lines, e.g. "gmail.threads.get". */
   label: string;
   /** Injected in tests so they do not actually sleep. */
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Injected in tests to make the jitter deterministic. */
   random?: () => number;
+  /** Cancels the wait and stops further attempts when the job is being retried. */
+  signal?: AbortSignal;
 }
 
 const DEFAULTS = {
   attempts: 5,
-  baseDelayMs: 500,
-  maxDelayMs: 32_000,
+  /** A retry sooner than this is indistinguishable from not backing off at all. */
+  minDelayMs: 1_000,
+  maxDelayMs: 30_000,
   maxRetryAfterMs: 120_000,
 } as const;
 
-const defaultSleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+/** Jitter adds up to 50% on top of the computed delay, and never subtracts. */
+const JITTER_RATIO = 0.5;
+
+/** Thrown when a wait is cut short because the work was cancelled. */
+export class AbortedError extends Error {
+  constructor(message = "operation aborted") {
+    super(message);
+    this.name = "AbortedError";
+  }
+}
+
+/** True for the several shapes an abort arrives in (ours, Gaxios, undici, Node). */
+export function isAbortError(error: unknown): boolean {
+  if (error instanceof AbortedError) return true;
+  const name = (error as { name?: string } | null)?.name;
+  const code = (error as { code?: string | number } | null)?.code;
+  return (
+    name === "AbortError" || name === "RateLimiterAbortError" || code === "ABORT_ERR"
+  );
+}
+
+const defaultSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AbortedError());
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new AbortedError());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 /** Gmail's rate-limit reasons, which arrive as 403 rather than 429. */
 const RATE_LIMIT_REASONS = new Set([
@@ -45,7 +91,7 @@ const RATE_LIMIT_REASONS = new Set([
 ]);
 
 interface GoogleApiErrorish {
-  code?: number;
+  code?: number | string;
   status?: number;
   message?: string;
   response?: {
@@ -62,7 +108,8 @@ function asErrorish(error: unknown): GoogleApiErrorish {
 
 function statusOf(error: unknown): number | undefined {
   const e = asErrorish(error);
-  return e.response?.status ?? e.status ?? e.code;
+  const candidate = e.response?.status ?? e.status ?? e.code;
+  return typeof candidate === "number" ? candidate : undefined;
 }
 
 /** Pulls the `reason` out of a Google JSON error body, wherever it is hiding. */
@@ -85,6 +132,8 @@ export function reasonOf(error: unknown): string | undefined {
  * and retrying it only delays the real error.
  */
 export function isRetryable(error: unknown): boolean {
+  if (isAbortError(error)) return false;
+
   const status = statusOf(error);
   const reason = reasonOf(error);
 
@@ -118,19 +167,27 @@ export function retryAfterMs(error: unknown, now: number = Date.now()): number |
 }
 
 /**
- * Full jitter: `random() * min(cap, base * 2^attempt)`. Preferred over
- * equal-jitter here because the retries we care about are a thundering herd of
- * identical thread fetches, and full jitter spreads them widest.
+ * `min(ceiling, floor * 2^(attempt-1))`, then jitter as a multiplier on top.
+ *
+ * The result is never below the floor and never below the un-jittered delay — the
+ * jitter only ever pushes a retry later, spreading a batch out instead of pulling
+ * part of it forward into the window that just rejected it.
  */
 export function backoffDelayMs(
   attempt: number,
-  options: { baseDelayMs: number; maxDelayMs: number; random: () => number },
+  options: { minDelayMs: number; maxDelayMs: number; random: () => number },
 ): number {
   const exponential = Math.min(
     options.maxDelayMs,
-    options.baseDelayMs * 2 ** Math.max(0, attempt - 1),
+    options.minDelayMs * 2 ** Math.max(0, attempt - 1),
   );
-  return Math.round(options.random() * exponential);
+  const jittered = exponential * (1 + options.random() * JITTER_RATIO);
+  // The ceiling is a hard bound on the result, not just on the curve before jitter:
+  // "exponential to 30s" should mean no retry ever waits longer than 30s.
+  return Math.min(
+    options.maxDelayMs,
+    Math.max(options.minDelayMs, Math.round(jittered)),
+  );
 }
 
 export async function withRetry<T>(
@@ -138,7 +195,7 @@ export async function withRetry<T>(
   options: RetryOptions,
 ): Promise<T> {
   const attempts = options.attempts ?? DEFAULTS.attempts;
-  const baseDelayMs = options.baseDelayMs ?? DEFAULTS.baseDelayMs;
+  const minDelayMs = options.minDelayMs ?? DEFAULTS.minDelayMs;
   const maxDelayMs = options.maxDelayMs ?? DEFAULTS.maxDelayMs;
   const maxRetryAfterMs = options.maxRetryAfterMs ?? DEFAULTS.maxRetryAfterMs;
   const sleep = options.sleep ?? defaultSleep;
@@ -152,13 +209,18 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error;
 
+      // A cancelled job must not keep retrying: its next attempt is already
+      // running, and two attempts firing at once is what stacked the load.
+      if (isAbortError(error) || options.signal?.aborted) break;
       if (!isRetryable(error) || attempt === attempts) break;
 
       const serverAsked = retryAfterMs(error);
       const delay =
         serverAsked === null
-          ? backoffDelayMs(attempt, { baseDelayMs, maxDelayMs, random })
-          : Math.min(serverAsked, maxRetryAfterMs);
+          ? backoffDelayMs(attempt, { minDelayMs, maxDelayMs, random })
+          : // Even an explicit Retry-After is held to the floor: a provider saying
+            // "0" is not an invitation to retry in the same millisecond.
+            Math.max(minDelayMs, Math.min(serverAsked, maxRetryAfterMs));
 
       logger.warn(
         {
@@ -173,7 +235,7 @@ export async function withRetry<T>(
         "provider call failed; backing off",
       );
 
-      await sleep(delay);
+      await sleep(delay, options.signal);
     }
   }
 
@@ -186,9 +248,17 @@ export async function withRetry<T>(
  * the API and reason) but nothing from the response body is attached.
  */
 function toAppError(error: unknown, label: string): Error {
+  if (isAbortError(error)) {
+    return error instanceof Error ? error : new AbortedError();
+  }
+
   const status = statusOf(error);
   const reason = reasonOf(error);
-  const detail = { label, ...(status === undefined ? {} : { status }), ...(reason === undefined ? {} : { reason }) };
+  const detail = {
+    label,
+    ...(status === undefined ? {} : { status }),
+    ...(reason === undefined ? {} : { reason }),
+  };
 
   if (status === 429 || (reason !== undefined && RATE_LIMIT_REASONS.has(reason))) {
     return new RateLimitError(`${label} exhausted retries against a rate limit`, detail);
@@ -202,27 +272,34 @@ function toAppError(error: unknown, label: string): Error {
 }
 
 /**
- * Runs tasks with a ceiling on how many are in flight.
+ * Runs tasks with a ceiling on how many are in flight, stopping early if aborted.
  *
- * A 90-day backfill is thousands of `threads.get` calls; firing them all at once
- * is the fastest way to a 429 and to an unbounded memory spike. Order of results
- * matches order of inputs.
+ * The cap is a quota decision as much as a memory one: each in-flight `threads.get`
+ * is 10 quota units, so the ceiling here multiplies against the token bucket's
+ * budget. Order of results matches order of inputs.
  */
 export async function mapWithConcurrency<In, Out>(
   items: readonly In[],
   limit: number,
   task: (item: In, index: number) => Promise<Out>,
+  signal?: AbortSignal,
 ): Promise<Out[]> {
   const results = new Array<Out>(items.length);
   let cursor = 0;
 
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    for (;;) {
-      const index = cursor++;
-      if (index >= items.length) return;
-      results[index] = await task(items[index] as In, index);
-    }
-  });
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      for (;;) {
+        // Checked before each task, not only at the start: an abort part-way
+        // through a page must stop the rest of that page being requested.
+        if (signal?.aborted) throw new AbortedError();
+        const index = cursor++;
+        if (index >= items.length) return;
+        results[index] = await task(items[index] as In, index);
+      }
+    },
+  );
 
   await Promise.all(workers);
   return results;

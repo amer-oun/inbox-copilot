@@ -8,6 +8,7 @@ import {
   withRetry,
 } from "./retry.js";
 import { RateLimitError, UnauthorizedError, UpstreamError } from "./errors.js";
+import { AbortedError } from "./retry.js";
 
 /**
  * Backoff behaviour, tested without sleeping: `sleep` and `random` are injected so
@@ -101,17 +102,48 @@ describe("retryAfterMs", () => {
 });
 
 describe("backoffDelayMs", () => {
-  it("grows exponentially and is capped", () => {
-    const options = { baseDelayMs: 500, maxDelayMs: 4_000, random: () => 1 };
-    expect(backoffDelayMs(1, options)).toBe(500);
-    expect(backoffDelayMs(2, options)).toBe(1_000);
-    expect(backoffDelayMs(3, options)).toBe(2_000);
-    expect(backoffDelayMs(9, options)).toBe(4_000);
+  /** No jitter, so the curve itself is visible. */
+  const noJitter = { minDelayMs: 1_000, maxDelayMs: 30_000, random: () => 0 };
+
+  it("starts at the floor and doubles up to the ceiling", () => {
+    expect(backoffDelayMs(1, noJitter)).toBe(1_000);
+    expect(backoffDelayMs(2, noJitter)).toBe(2_000);
+    expect(backoffDelayMs(3, noJitter)).toBe(4_000);
+    expect(backoffDelayMs(6, noJitter)).toBe(30_000);
+    expect(backoffDelayMs(20, noJitter)).toBe(30_000);
   });
 
-  it("applies full jitter, so two clients do not retry in lockstep", () => {
-    const options = { baseDelayMs: 1_000, maxDelayMs: 8_000, random: () => 0.25 };
-    expect(backoffDelayMs(3, options)).toBe(1_000);
+  it("never returns less than the floor, whatever the jitter rolls", () => {
+    // The bug this replaces: full jitter (random() * delay) produced ~5ms retries,
+    // which is not a backoff at all.
+    for (const roll of [0, 0.01, 0.5, 0.999]) {
+      const delay = backoffDelayMs(1, { ...noJitter, random: () => roll });
+      expect(delay).toBeGreaterThanOrEqual(1_000);
+    }
+  });
+
+  it("applies jitter as a multiplier on top, so it only ever delays further", () => {
+    const jittered = backoffDelayMs(2, { ...noJitter, random: () => 1 });
+    expect(jittered).toBe(3_000); // 2000 * (1 + 0.5)
+    expect(jittered).toBeGreaterThan(backoffDelayMs(2, noJitter));
+  });
+
+  it("never exceeds the ceiling, jitter included", () => {
+    for (const roll of [0, 0.5, 1]) {
+      for (const attempt of [1, 5, 6, 12]) {
+        expect(
+          backoffDelayMs(attempt, { ...noJitter, random: () => roll }),
+        ).toBeLessThanOrEqual(30_000);
+      }
+    }
+  });
+
+  it("spreads a batch out rather than pulling any of it forward", () => {
+    const delays = [0.1, 0.4, 0.9].map((roll) =>
+      backoffDelayMs(3, { ...noJitter, random: () => roll }),
+    );
+    expect(new Set(delays).size).toBe(3);
+    expect(Math.min(...delays)).toBeGreaterThanOrEqual(4_000);
   });
 });
 
@@ -133,9 +165,9 @@ describe("withRetry", () => {
       .mockResolvedValue("ok");
 
     await expect(
-      withRetry(fn, { label: "test", sleep, random: () => 1, baseDelayMs: 100 }),
+      withRetry(fn, { label: "test", sleep, random: () => 0, minDelayMs: 1_000 }),
     ).resolves.toBe("ok");
-    expect(sleep).toHaveBeenCalledWith(100);
+    expect(sleep).toHaveBeenCalledWith(1_000, undefined);
   });
 
   it("honours Retry-After over its own backoff curve", async () => {
@@ -145,8 +177,8 @@ describe("withRetry", () => {
       .mockRejectedValueOnce(apiError({ status: 429, retryAfter: "7" }))
       .mockResolvedValue("ok");
 
-    await withRetry(fn, { label: "test", sleep, random: () => 1, baseDelayMs: 100 });
-    expect(sleep).toHaveBeenCalledWith(7_000);
+    await withRetry(fn, { label: "test", sleep, random: () => 1, minDelayMs: 1_000 });
+    expect(sleep).toHaveBeenCalledWith(7_000, undefined);
   });
 
   it("caps an absurd Retry-After rather than blocking the worker for an hour", async () => {
@@ -157,7 +189,43 @@ describe("withRetry", () => {
       .mockResolvedValue("ok");
 
     await withRetry(fn, { label: "test", sleep, maxRetryAfterMs: 60_000 });
-    expect(sleep).toHaveBeenCalledWith(60_000);
+    expect(sleep).toHaveBeenCalledWith(60_000, undefined);
+  });
+
+  it("holds a Retry-After of zero to the floor", async () => {
+    // A provider answering "retry after 0 seconds" is not an invitation to retry in
+    // the same millisecond.
+    const sleep = vi.fn(noSleep);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(apiError({ status: 429, retryAfter: "0" }))
+      .mockResolvedValue("ok");
+
+    await withRetry(fn, { label: "test", sleep, minDelayMs: 1_000 });
+    expect(sleep).toHaveBeenCalledWith(1_000, undefined);
+  });
+
+  it("stops retrying once the signal is aborted", async () => {
+    // The whole point of cancellation: a retried job must not have its predecessor
+    // still firing requests beside it.
+    const controller = new AbortController();
+    const fn = vi.fn().mockImplementation(async () => {
+      controller.abort();
+      throw apiError({ status: 429 });
+    });
+
+    await expect(
+      withRetry(fn, { label: "test", sleep: noSleep, signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry an abort error itself", async () => {
+    const abort = new AbortedError();
+    const fn = vi.fn().mockRejectedValue(abort);
+
+    await expect(withRetry(fn, { label: "test", sleep: noSleep })).rejects.toBe(abort);
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it("gives up after the attempt budget and reports a rate limit as one", async () => {
@@ -228,6 +296,28 @@ describe("mapWithConcurrency", () => {
 
   it("handles an empty input", async () => {
     expect(await mapWithConcurrency([], 5, async () => 1)).toEqual([]);
+  });
+
+  it("stops launching tasks once aborted", async () => {
+    const controller = new AbortController();
+    const started: number[] = [];
+
+    await expect(
+      mapWithConcurrency(
+        [1, 2, 3, 4, 5, 6],
+        2,
+        async (item) => {
+          started.push(item);
+          if (started.length === 2) controller.abort();
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return item;
+        },
+        controller.signal,
+      ),
+    ).rejects.toThrow(AbortedError);
+
+    // The remaining items are never requested — that is the quota saved.
+    expect(started.length).toBeLessThan(6);
   });
 
   it("propagates a task failure", async () => {

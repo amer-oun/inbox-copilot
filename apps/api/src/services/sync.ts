@@ -6,6 +6,7 @@ import {
   type SyncStatusResponse,
 } from "@inbox-copilot/shared";
 import { ConflictError, NotFoundError } from "../lib/errors.js";
+import { AbortedError, isAbortError } from "../lib/retry.js";
 import { logger } from "../lib/logger.js";
 import {
   backfillJobId,
@@ -39,6 +40,9 @@ interface MailboxRow {
   emailAddress: string;
   syncStatus: string;
   syncCursor: string | null;
+  /** Checkpoint of an unfinished backfill; see `runBackfill`. */
+  backfillPageToken: string | null;
+  backfillCursor: string | null;
 }
 
 const MAILBOX_SELECT = {
@@ -48,6 +52,8 @@ const MAILBOX_SELECT = {
   emailAddress: true,
   syncStatus: true,
   syncCursor: true,
+  backfillPageToken: true,
+  backfillCursor: true,
 } as const;
 
 async function loadMailbox(userId: string, mailAccountId: string): Promise<MailboxRow> {
@@ -190,19 +196,33 @@ export interface BackfillProgress {
 }
 
 /**
- * Runs a full backfill for one mailbox. This is the worker's job body; it is
- * exported so it can be driven directly from tests with a stubbed provider.
+ * Runs a backfill for one mailbox — resuming an unfinished one rather than starting
+ * over. This is the worker job body, exported so tests can drive it with a stubbed
+ * provider.
  *
- * `onProgress` exists so the queue can surface progress without this function
- * knowing what a BullMQ job is.
+ * Resumption matters because a rate-limited run is exactly the run that already wrote
+ * thousands of rows: restarting it re-requests every one of those threads and walks
+ * straight back into the limit. The checkpoint is two columns on the mailbox — the
+ * next page token, and the history pointer captured when the run first began.
+ *
+ * That *original* pointer is what a resume reuses, never a fresh one: re-reading it
+ * would skip everything that arrived during the attempt that failed.
+ *
+ * `signal` cancels in-flight provider calls. When BullMQ retries a job the previous
+ * attempt is abandoned but its requests are not — without this they keep firing
+ * alongside the new attempt, which is how attempts stack into a rate limit.
  */
 export async function runBackfill(
   job: BackfillJob,
-  hooks: { onProgress?: (progress: BackfillProgress) => Promise<void> } = {},
+  hooks: {
+    onProgress?: (progress: BackfillProgress) => Promise<void>;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<BackfillProgress> {
   const { userId, mailAccountId } = job;
   const log = logger.child({ userId, mailAccountId });
   const db = dbForUser(userId);
+  const signal = hooks.signal;
 
   const mailbox = await loadMailbox(userId, mailAccountId);
   if (mailbox.syncStatus === "REVOKED") {
@@ -216,6 +236,7 @@ export async function runBackfill(
     mailAccountId,
     userId,
     emailAddress: mailbox.emailAddress,
+    ...(signal ? { signal } : {}),
   });
 
   await db.mailAccount.update({
@@ -224,30 +245,59 @@ export async function runBackfill(
   });
 
   /*
-   * Read the history pointer BEFORE paging, not after.
+   * Resume, or start fresh.
    *
-   * Anything that arrives while the backfill runs gets a higher history id, so a
-   * cursor taken at the start replays those few messages on the first delta. A
-   * cursor taken at the end would skip everything that landed during the run —
-   * silently, which is the worst kind of gap.
+   * A fresh run reads the history pointer BEFORE paging, not after: anything arriving
+   * mid-run gets a higher history id, so a cursor taken at the start replays those few
+   * messages on the first delta, whereas a cursor taken at the end would skip them
+   * silently. A resumed run inherits that same pointer and skips getProfile entirely —
+   * one fewer request, and the right value.
    */
-  const profile = await provider.getProfile();
+  const resuming = mailbox.backfillCursor !== null;
+  let historyCursor: string | null;
+  let pageToken: string | undefined;
+
+  if (resuming) {
+    historyCursor = mailbox.backfillCursor;
+    pageToken = mailbox.backfillPageToken ?? undefined;
+    log.info(
+      { pageToken: pageToken ?? null, cursor: historyCursor },
+      "resuming backfill from checkpoint",
+    );
+  } else {
+    const profile = await provider.getProfile();
+    historyCursor = profile.historyId;
+    // An explicit page token on the payload allows a manual resume.
+    pageToken = job.pageToken;
+    await db.mailAccount.update({
+      where: { id: mailAccountId },
+      data: {
+        backfillCursor: historyCursor,
+        backfillPageToken: pageToken ?? null,
+      },
+    });
+  }
 
   const since = new Date(Date.now() - job.windowDays * 24 * 60 * 60 * 1_000);
-  const progress: BackfillProgress = { threadsProcessed: 0, messagesWritten: 0, pagesRead: 0 };
+  const progress: BackfillProgress = {
+    threadsProcessed: 0,
+    messagesWritten: 0,
+    pagesRead: 0,
+  };
 
-  let pageToken = job.pageToken;
   let oldestSeen: Date | null = null;
 
   try {
     do {
+      if (signal?.aborted) throw new AbortedError("backfill cancelled");
+
       const page = await provider.listThreadIds({
         limit: BACKFILL_BATCH_SIZE,
         after: since,
         ...(pageToken === undefined ? {} : { pageToken }),
       });
 
-      const threads = await fetchThreads(provider, page.items);
+      const threads = await fetchThreads(provider, page.items, signal);
       progress.pagesRead += 1;
 
       for (const thread of threads) {
@@ -261,22 +311,28 @@ export async function runBackfill(
         if (first && (oldestSeen === null || first < oldestSeen)) oldestSeen = first;
       }
 
-      // Per-page progress so a long backfill is observable, and so a crash leaves
-      // a truthful record of how far it got.
-      if (oldestSeen !== null) {
-        await db.mailAccount.update({
-          where: { id: mailAccountId },
-          data: { backfilledUntil: oldestSeen },
-        });
-      }
-      await hooks.onProgress?.({ ...progress });
-
       pageToken = page.nextPageToken ?? undefined;
+
+      /*
+       * Checkpoint AFTER this page is committed, storing the *next* page token. A
+       * retry then starts at the first page whose threads are not yet written, which
+       * is what makes finishing a failed run cheap.
+       */
+      await db.mailAccount.update({
+        where: { id: mailAccountId },
+        data: {
+          backfillPageToken: pageToken ?? null,
+          ...(oldestSeen === null ? {} : { backfilledUntil: oldestSeen }),
+        },
+      });
+
+      await hooks.onProgress?.({ ...progress });
     } while (pageToken !== undefined);
 
     /*
-     * Only now does the cursor advance (§4). Every thread above is committed, so
-     * the next delta starts from a point we have genuinely caught up to.
+     * Only now does the delta cursor advance (§4). Every thread above is committed, so
+     * the next delta starts from a point we have genuinely caught up to. The checkpoint
+     * is cleared in the same write: this backfill is no longer in progress.
      */
     await db.mailAccount.update({
       where: { id: mailAccountId },
@@ -284,26 +340,36 @@ export async function runBackfill(
         syncStatus: "ACTIVE",
         syncError: null,
         lastSyncedAt: new Date(),
-        ...(profile.historyId === null ? {} : { syncCursor: profile.historyId }),
+        backfillPageToken: null,
+        backfillCursor: null,
+        ...(historyCursor === null ? {} : { syncCursor: historyCursor }),
       },
     });
 
     log.info(
-      { ...progress, cursor: profile.historyId },
+      { ...progress, cursor: historyCursor, resumed: resuming },
       "backfill complete; mailbox is active",
     );
     return progress;
   } catch (error) {
-    // The cursor is deliberately left untouched: a failed backfill must resume
-    // from where it was, and an unchanged cursor means the next attempt replays.
+    /*
+     * The delta cursor is left untouched and the checkpoint is deliberately KEPT: the
+     * next attempt resumes from it. A cancelled attempt is not an error state either —
+     * its retry is already scheduled, so the mailbox goes back to PENDING.
+     */
+    const cancelled = isAbortError(error);
     await db.mailAccount.update({
       where: { id: mailAccountId },
-      data: {
-        syncStatus: "ERROR",
-        syncError: errorSummary(error),
-      },
+      data: cancelled
+        ? { syncStatus: "PENDING" }
+        : { syncStatus: "ERROR", syncError: errorSummary(error) },
     });
-    log.error({ err: error, ...progress }, "backfill failed");
+
+    if (cancelled) {
+      log.warn({ ...progress }, "backfill cancelled; checkpoint kept for the retry");
+    } else {
+      log.error({ err: error, ...progress }, "backfill failed");
+    }
     throw error;
   }
 }

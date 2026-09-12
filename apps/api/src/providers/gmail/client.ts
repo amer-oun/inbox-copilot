@@ -2,6 +2,7 @@ import { google, type gmail_v1 } from "googleapis";
 import { NotFoundError, UpstreamError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import { mapWithConcurrency, withRetry } from "../../lib/retry.js";
+import { acquireGmailQuota, type GmailMethod } from "../../lib/rateLimiter.js";
 import { getAccessToken } from "../tokenManager.js";
 import { mapThread } from "./map.js";
 import type {
@@ -21,13 +22,21 @@ import type {
  * `getAccessToken(mailAccountId, userId)` before every call — never cached on the
  * instance, so a token that expires mid-backfill is refreshed by the token manager
  * rather than failing the job.
+ *
+ * Every call also spends its documented quota cost from the mailbox token bucket
+ * before firing, and carries the job's AbortSignal so a cancelled backfill stops
+ * making requests instead of racing its own retry.
  */
 
 /** Gmail caps `threads.list` at 500; 50 is the backfill batch size from §4. */
 const MAX_PAGE_SIZE = 500;
 
-/** In-flight `threads.get` calls per batch. Keeps a backfill off the rate limiter. */
-const THREAD_FETCH_CONCURRENCY = 5;
+/**
+ * In-flight `threads.get` calls per batch. Two, not five: each is 10 quota units, so
+ * the ceiling here is a multiplier on the bucket's budget, and the bucket — not this
+ * number — is what paces the run.
+ */
+const THREAD_FETCH_CONCURRENCY = 2;
 
 export function createGmailProvider(context: MailProviderContext): MailProvider {
   const log = logger.child({
@@ -47,16 +56,36 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
     return google.gmail({ version: "v1", auth });
   }
 
-  async function call<T>(label: string, fn: (gmail: gmail_v1.Gmail) => Promise<T>): Promise<T> {
-    return withRetry(async () => fn(await api()), { label: `gmail.${label}` });
+  /**
+   * One place where every Gmail request is paced, authenticated, retried and
+   * cancellable. Quota is acquired inside the retry body, so a retried call pays
+   * for itself again — it is a second request, and the bucket has to know.
+   */
+  async function call<T>(
+    method: GmailMethod,
+    fn: (gmail: gmail_v1.Gmail, requestOptions: { signal?: AbortSignal }) => Promise<T>,
+  ): Promise<T> {
+    const signal = context.signal;
+
+    return withRetry(
+      async () => {
+        await acquireGmailQuota(context.mailAccountId, method, signal);
+        const gmail = await api();
+        return fn(gmail, signal ? { signal } : {});
+      },
+      {
+        label: `gmail.${method}`,
+        ...(signal ? { signal } : {}),
+      },
+    );
   }
 
   return {
     providerType: "GMAIL",
 
     async getProfile() {
-      const profile = await call("users.getProfile", async (gmail) =>
-        gmail.users.getProfile({ userId: "me" }),
+      const profile = await call("users.getProfile", async (gmail, requestOptions) =>
+        gmail.users.getProfile({ userId: "me" }, requestOptions),
       );
 
       const emailAddress = profile.data.emailAddress;
@@ -80,16 +109,19 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
         ? `after:${Math.floor(options.after.getTime() / 1000)}`
         : undefined;
 
-      const response = await call("threads.list", async (gmail) =>
-        gmail.users.threads.list({
-          userId: "me",
-          maxResults: Math.min(options.limit, MAX_PAGE_SIZE),
-          ...(options.pageToken === undefined ? {} : { pageToken: options.pageToken }),
-          ...(query === undefined ? {} : { q: query }),
-          // Spam and trash are not mail the user is working with, and including
-          // them would put phishing bodies in the DB for no benefit yet.
-          includeSpamTrash: false,
-        }),
+      const response = await call("users.threads.list", async (gmail, requestOptions) =>
+        gmail.users.threads.list(
+          {
+            userId: "me",
+            maxResults: Math.min(options.limit, MAX_PAGE_SIZE),
+            ...(options.pageToken === undefined ? {} : { pageToken: options.pageToken }),
+            ...(query === undefined ? {} : { q: query }),
+            // Spam and trash are not mail the user is working with, and including
+            // them would put phishing bodies in the DB for no benefit yet.
+            includeSpamTrash: false,
+          },
+          requestOptions,
+        ),
       );
 
       const items = (response.data.threads ?? [])
@@ -100,26 +132,34 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
     },
 
     async getThread(providerThreadId: string): Promise<RawThread> {
-      const response = await call("threads.get", async (gmail) =>
-        gmail.users.threads.get({
-          userId: "me",
-          id: providerThreadId,
-          // `full` gives headers and body without the raw RFC822 blob, which we
-          // would only have to re-parse ourselves.
-          format: "full",
-        }),
+      const response = await call("users.threads.get", async (gmail, requestOptions) =>
+        gmail.users.threads.get(
+          {
+            userId: "me",
+            id: providerThreadId,
+            // `full` gives headers and body without the raw RFC822 blob, which we
+            // would only have to re-parse ourselves.
+            format: "full",
+          },
+          requestOptions,
+        ),
       );
 
       return mapThread(response.data, { mailboxAddress: context.emailAddress });
     },
 
     async getAttachment(providerMessageId: string, attachmentId: string): Promise<Buffer> {
-      const response = await call("messages.attachments.get", async (gmail) =>
-        gmail.users.messages.attachments.get({
-          userId: "me",
-          messageId: providerMessageId,
-          id: attachmentId,
-        }),
+      const response = await call(
+        "users.messages.attachments.get",
+        async (gmail, requestOptions) =>
+          gmail.users.messages.attachments.get(
+            {
+              userId: "me",
+              messageId: providerMessageId,
+              id: attachmentId,
+            },
+            requestOptions,
+          ),
       );
 
       const data = response.data.data;
@@ -147,12 +187,15 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
       let newCursor = cursor;
 
       do {
-        const response = await call("history.list", async (gmail) =>
-          gmail.users.history.list({
-            userId: "me",
-            startHistoryId: cursor,
-            ...(pageToken === undefined ? {} : { pageToken }),
-          }),
+        const response = await call("users.history.list", async (gmail, requestOptions) =>
+          gmail.users.history.list(
+            {
+              userId: "me",
+              startHistoryId: cursor,
+              ...(pageToken === undefined ? {} : { pageToken }),
+            },
+            requestOptions,
+          ),
         );
 
         newCursor = response.data.historyId ?? newCursor;
@@ -260,8 +303,12 @@ function mergeLabelChange(
 export async function fetchThreads(
   provider: MailProvider,
   providerThreadIds: readonly string[],
+  signal?: AbortSignal,
 ): Promise<RawThread[]> {
-  return mapWithConcurrency(providerThreadIds, THREAD_FETCH_CONCURRENCY, async (id) =>
-    provider.getThread(id),
+  return mapWithConcurrency(
+    providerThreadIds,
+    THREAD_FETCH_CONCURRENCY,
+    async (id) => provider.getThread(id),
+    signal,
   );
 }

@@ -166,4 +166,10 @@ export interface MailProviderContext {
   userId: string;
   /** The mailbox's own address — how `isOutbound` is decided. */
   emailAddress: string;
+  /**
+   * Cancels in-flight requests. A provider instance belongs to one unit of work (a
+   * backfill attempt), so when that work is abandoned its requests must stop rather
+   * than continue alongside the next attempt.
+   */
+  signal?: AbortSignal;
 }
