@@ -4,15 +4,19 @@ import { logger } from "./lib/logger.js";
 import { env } from "./lib/env.js";
 import {
   aiEnrichJobSchema,
+  aiSweepJobSchema,
+  scheduleAiSweep,
   backfillJobSchema,
   bullConnection,
   closeQueues,
   QUEUE_NAMES,
   type AiEnrichJob,
+  type AiSweepJob,
   type BackfillJob,
 } from "./lib/queues.js";
 import { runBackfill } from "./services/sync.js";
 import { runEnrich } from "./services/ai/enrich.js";
+import { sweepAllEnrichment } from "./services/ai/sweep.js";
 import { MailAccountRevokedError, NotFoundError } from "./lib/errors.js";
 import { ConflictError } from "./lib/errors.js";
 
@@ -151,6 +155,23 @@ async function processEnrich(job: Job<AiEnrichJob>): Promise<void> {
   }
 }
 
+/**
+ * The scheduled sweep: find messages with no classification and queue them.
+ *
+ * This is what stops a spent daily cap from becoming permanent. It runs on one
+ * worker only because BullMQ's scheduler delivers each repeat once, whatever the
+ * number of workers.
+ */
+async function processSweep(job: Job<AiSweepJob>): Promise<void> {
+  const payload = aiSweepJobSchema.parse(job.data);
+  const results = await sweepAllEnrichment(payload);
+
+  const queued = results.reduce((sum, result) => sum + result.queued, 0);
+  if (queued > 0) {
+    logger.info({ jobId: job.id, queued, users: results.length }, "sweep queued enrichment");
+  }
+}
+
 const worker = new Worker<BackfillJob>(QUEUE_NAMES.syncBackfill, processBackfill, {
   connection: bullConnection,
   concurrency: WORKER_CONCURRENCY,
@@ -161,6 +182,23 @@ const enrichWorker = new Worker<AiEnrichJob>(QUEUE_NAMES.aiEnrich, processEnrich
   connection: bullConnection,
   concurrency: ENRICH_CONCURRENCY,
 });
+
+const sweepWorker = new Worker<AiSweepJob>(QUEUE_NAMES.aiSweep, processSweep, {
+  connection: bullConnection,
+  concurrency: 1,
+});
+
+sweepWorker.on("failed", (job, error) => {
+  logger.error({ queue: QUEUE_NAMES.aiSweep, jobId: job?.id, err: error }, "sweep failed");
+});
+
+sweepWorker.on("error", (error) => {
+  logger.warn({ err: error }, "sweep worker error");
+});
+
+// Registered here rather than at enqueue time: the schedule is a property of the
+// worker deployment, and upserting it makes a restart converge on one schedule.
+await scheduleAiSweep();
 
 enrichWorker.on("failed", (job, error) => {
   abortJob(`enrich-${job?.id}`, "job failed");
@@ -211,7 +249,7 @@ worker.on("error", (error) => {
 
 logger.info(
   {
-    queues: [QUEUE_NAMES.syncBackfill, QUEUE_NAMES.aiEnrich],
+    queues: [QUEUE_NAMES.syncBackfill, QUEUE_NAMES.aiEnrich, QUEUE_NAMES.aiSweep],
     concurrency: { backfill: WORKER_CONCURRENCY, enrich: ENRICH_CONCURRENCY },
     env: env.NODE_ENV,
   },
@@ -224,7 +262,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   for (const [jobId] of inFlight) abortJob(jobId, "worker shutting down");
   // `close()` waits for in-flight jobs so a deploy does not abandon a backfill
   // halfway through a page.
-  await Promise.all([worker.close(), enrichWorker.close()]);
+  await Promise.all([worker.close(), enrichWorker.close(), sweepWorker.close()]);
   await Promise.allSettled([closeQueues(), disconnectDatabase()]);
   process.exit(0);
 }

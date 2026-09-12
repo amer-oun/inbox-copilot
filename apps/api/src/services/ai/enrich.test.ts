@@ -27,11 +27,12 @@ const tenantCalls = vi.hoisted(() => [] as string[]);
 const classifyMessage = vi.hoisted(() => vi.fn());
 const summarizeThread = vi.hoisted(() => vi.fn());
 const addBulk = vi.hoisted(() => vi.fn());
+const getJob = vi.hoisted(() => vi.fn());
 
 vi.mock("./classify.js", () => ({ classifyMessage }));
 vi.mock("./summarize.js", () => ({ summarizeThread }));
 vi.mock("../../lib/queues.js", () => ({
-  aiEnrichQueue: () => ({ addBulk }),
+  aiEnrichQueue: () => ({ addBulk, getJob }),
   aiEnrichJobId: (id: string) => `enrich-${id}`,
 }));
 
@@ -91,6 +92,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ summary: null, fromCache: false, skipped: "below-threshold" });
   addBulk.mockReset().mockResolvedValue([]);
+  getJob.mockReset().mockResolvedValue(null);
 });
 
 describe("runEnrich", () => {
@@ -266,7 +268,7 @@ describe("runEnrich settings and limits", () => {
 });
 
 describe("enqueueEnrichment", () => {
-  it("queues one deduplicated job per message", async () => {
+  it("queues one job per message, keyed by message id", async () => {
     const queued = await enqueueEnrichment({
       userId: USER_ID,
       mailAccountId: MAIL_ACCOUNT_ID,
@@ -291,6 +293,69 @@ describe("enqueueEnrichment", () => {
   it("does not touch the queue for an empty list", async () => {
     expect(
       await enqueueEnrichment({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID, messageIds: [] }),
+    ).toBe(0);
+    expect(addBulk).not.toHaveBeenCalled();
+  });
+
+  it("leaves a job that is still pending alone", async () => {
+    getJob.mockResolvedValue({ getState: async () => "waiting", remove: vi.fn() });
+
+    const queued = await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["msg_1"],
+    });
+
+    expect(queued).toBe(0);
+    expect(addBulk).not.toHaveBeenCalled();
+  });
+
+  it("clears a finished job's id so the message can be enriched again", async () => {
+    /*
+     * The bug this pins: BullMQ retains completed jobs, and an id it still holds it
+     * silently refuses to re-add. Without the removal the cap sweep would do nothing
+     * for the ten minutes after a capped run — precisely when it is needed.
+     */
+    const remove = vi.fn().mockResolvedValue(undefined);
+    getJob.mockResolvedValue({ getState: async () => "completed", remove });
+
+    const queued = await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["msg_1"],
+    });
+
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(queued).toBe(1);
+    expect(addBulk).toHaveBeenCalledWith([
+      expect.objectContaining({ opts: { jobId: "enrich-msg_1" } }),
+    ]);
+  });
+
+  it("clears a failed job's id too", async () => {
+    const remove = vi.fn().mockResolvedValue(undefined);
+    getJob.mockResolvedValue({ getState: async () => "failed", remove });
+
+    expect(
+      await enqueueEnrichment({
+        userId: USER_ID,
+        mailAccountId: MAIL_ACCOUNT_ID,
+        messageIds: ["msg_1"],
+      }),
+    ).toBe(1);
+    expect(remove).toHaveBeenCalled();
+  });
+
+  it("skips a job it cannot remove rather than failing the batch", async () => {
+    const remove = vi.fn().mockRejectedValue(new Error("job is locked"));
+    getJob.mockResolvedValue({ getState: async () => "completed", remove });
+
+    expect(
+      await enqueueEnrichment({
+        userId: USER_ID,
+        mailAccountId: MAIL_ACCOUNT_ID,
+        messageIds: ["msg_1"],
+      }),
     ).toBe(0);
     expect(addBulk).not.toHaveBeenCalled();
   });

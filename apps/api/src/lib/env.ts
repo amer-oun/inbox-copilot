@@ -66,6 +66,16 @@ const envSchema = z.object({
    */
   ANTHROPIC_API_KEY: z.string().default(""),
 
+  /**
+   * Send AI calls somewhere other than api.anthropic.com: the local stub in
+   * development, or a gateway in a deployment. Empty means the real API (or the
+   * stub, outside production, when there is also no key — see ai/endpoint.ts).
+   */
+  ANTHROPIC_BASE_URL: z.union([z.literal(""), z.url()]).default(""),
+
+  /** Port for the development AI stub (`pnpm ai:stub`). */
+  AI_STUB_PORT: z.coerce.number().int().min(1).max(65535).default(4010),
+
   MICROSOFT_CLIENT_ID: z.string().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().default(""),
   /** "common" for multi-tenant + personal accounts; a GUID to lock to one tenant. */

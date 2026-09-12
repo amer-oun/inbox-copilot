@@ -6,6 +6,7 @@ import { logger } from "../../lib/logger.js";
 import { withRetry } from "../../lib/retry.js";
 import { FEATURE_MODELS, MAX_OUTPUT_TOKENS, type AiFeature } from "./models.js";
 import { isRegisteredSystemPrompt, SYSTEM_PROMPTS } from "./prompts.js";
+import { resolveAiEndpoint } from "./endpoint.js";
 import type { TokenCounts } from "./models.js";
 import { checkDailyCap, loadAiSettings, recordUsage, type AiSettings } from "./usage.js";
 
@@ -36,12 +37,31 @@ let client: Anthropic | undefined;
 export function anthropic(): Anthropic {
   if (client) return client;
 
-  if (env.ANTHROPIC_API_KEY === "") {
-    throw new UpstreamError("AI is not configured: ANTHROPIC_API_KEY is unset");
+  const endpoint = resolveAiEndpoint();
+
+  /*
+   * Logged at INFO, once, and never quietly: "which model answered" is the first
+   * question about any classification in the database, and a stubbed answer must
+   * be obvious from the logs rather than deduced from the data.
+   */
+  logger.info(
+    { baseURL: endpoint.baseURL ?? "https://api.anthropic.com", stubbed: endpoint.stubbed, reason: endpoint.reason },
+    endpoint.stubbed
+      ? "AI calls are STUBBED: responses are canned, nothing leaves this machine"
+      : "AI calls go to the Anthropic API",
+  );
+
+  if (endpoint.stubbed && env.NODE_ENV === "production") {
+    logger.error(
+      { baseURL: endpoint.baseURL },
+      "refusing to trust stubbed AI output in production",
+    );
+    throw new UpstreamError("AI stub endpoint configured in production");
   }
 
   client = new Anthropic({
-    apiKey: env.ANTHROPIC_API_KEY,
+    apiKey: endpoint.apiKey,
+    ...(endpoint.baseURL === undefined ? {} : { baseURL: endpoint.baseURL }),
     timeout: REQUEST_TIMEOUT_MS,
     // Our own retry wrapper owns this: one backoff policy, one set of log lines,
     // and a floor the SDK's defaults do not have (lib/retry.ts).

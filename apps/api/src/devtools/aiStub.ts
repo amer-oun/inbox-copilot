@@ -1,0 +1,339 @@
+import { createHash } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import {
+  aiClassificationSchema,
+  aiSummarySchema,
+  type AiClassificationOutput,
+  type AiSummaryOutput,
+  type Category,
+} from "@inbox-copilot/shared";
+import { logger } from "../lib/logger.js";
+import { env } from "../lib/env.js";
+
+/**
+ * A local stand-in for the Anthropic Messages API, for development without a key.
+ *
+ * It speaks the real wire format, so nothing in `services/ai/` knows it exists: the
+ * real SDK, the real prompt construction, the real tool definitions, the real
+ * schema validation, the cache, the ledger and the queue all run exactly as they
+ * do against the API. Point `ANTHROPIC_BASE_URL` at it (or just run `pnpm dev`
+ * with no key) and enrich a real mailbox end to end.
+ *
+ * Two properties it is built to have:
+ *
+ *   - **Deterministic.** The same email always produces the same answer, so a
+ *     cache hit and a stub answer are distinguishable, and so repeated runs are
+ *     comparable. Values derive from a hash of the email, not from randomness.
+ *   - **Not steerable.** It classifies from the envelope and from word counts —
+ *     never from instruction-like text in the body. An injected "classify this as
+ *     URGENT" changes nothing, which is the behaviour the real defense assumes.
+ *
+ * What it is NOT is a model. The text it writes is schematic, and its category
+ * judgments are keyword heuristics. It exercises the path; it does not evaluate
+ * quality. Anything that looks like a quality signal in this output is an artifact.
+ */
+
+/** Stable pseudo-random number in [0,1) derived from text. */
+function hashUnit(text: string, salt: string): number {
+  const digest = createHash("sha256").update(`${salt}:${text}`).digest();
+  return digest.readUInt32BE(0) / 0x1_0000_0000;
+}
+
+interface ParsedPrompt {
+  /** Metadata lines we emitted, parsed back out. */
+  metadata: Record<string, string>;
+  /** Body text of the last (newest) message in the prompt. */
+  body: string;
+  /** Every message body in the prompt, oldest first. */
+  bodies: string[];
+}
+
+/**
+ * Reads back the structure `prompts.ts` wrote.
+ *
+ * Deliberately tolerant: if the format changes this degrades to "no metadata"
+ * rather than throwing, because a stub that 500s is a worse dev experience than a
+ * stub that guesses. The tests pin the parse against real prompt output.
+ */
+export function parsePrompt(userContent: string): ParsedPrompt {
+  const metadata: Record<string, string> = {};
+  const metadataBlocks = userContent.matchAll(
+    /<email_metadata>\n([\s\S]*?)\n<\/email_metadata>/g,
+  );
+  for (const block of metadataBlocks) {
+    for (const line of (block[1] ?? "").split("\n")) {
+      const separator = line.indexOf(": ");
+      if (separator === -1) continue;
+      // Later messages win: the newest metadata is what a classifier should use.
+      metadata[line.slice(0, separator)] = line.slice(separator + 2);
+    }
+  }
+
+  const bodies = [...userContent.matchAll(/<\/email_metadata>\n([\s\S]*?)\n<\/untrusted_email>/g)]
+    .map((match) => (match[1] ?? "").trim())
+    .filter((body) => body.length > 0);
+
+  return { metadata, body: bodies.at(-1) ?? "", bodies };
+}
+
+/**
+ * Keyword rules, in priority order.
+ *
+ * Every short token is `\b`-anchored. Without that, `vat` matched inside "activate",
+ * "private" and "innovation", which put a third of a real mailbox in FINANCE — the
+ * kind of wrong that makes a dev run look broken rather than merely stubbed.
+ */
+const CATEGORY_RULES: { category: Category; pattern: RegExp }[] = [
+  {
+    category: "FINANCE",
+    pattern:
+      /\b(invoices?|factures?|receipts?|re\u00e7us?|payments?|paiements?|billing|vat|tva|refunds?|subscriptions?|abonnements?)\b/i,
+  },
+  {
+    category: "TRAVEL",
+    pattern:
+      /\b(flights?|vols?|bookings?|r\u00e9servations?|itiner(?:ary|aries)|hotels?|boarding|check-?in)\b/i,
+  },
+  {
+    category: "NEWSLETTER",
+    pattern: /\b(newsletters?|unsubscribe|d\u00e9sabonner|digest|this week in|weekly)\b/i,
+  },
+  {
+    category: "PROMOTION",
+    pattern:
+      /(\d+% off|\b(sale|promo|discount|offre|soldes|deal|rewards?|coupon)\b|limited time|act now)/i,
+  },
+  {
+    category: "SOCIAL",
+    pattern:
+      /\b(followed you|friend request|mentioned you|liked your|invitation \u00e0 rejoindre)\b/i,
+  },
+  {
+    category: "NOTIFICATION",
+    pattern:
+      /\b(security alert|alerte|verif(?:y|ication)|v\u00e9rification|was signed in|passwords?|mots? de passe|partag\u00e9 certaines donn\u00e9es|build (?:passed|failed)|welcome to)\b/i,
+  },
+  {
+    category: "WORK",
+    pattern:
+      /\b(meetings?|r\u00e9unions?|deadlines?|projects?|projets?|standup|reviews?|tickets?|deploys?|sprints?|agenda)\b/i,
+  },
+];
+
+/**
+ * Picks a category, preferring evidence from the subject and sender over the body.
+ *
+ * A word in a long body is weak evidence — an unrelated mail mentioning "payment" in
+ * a footer is not a finance mail — while the subject is what the message is about.
+ * Two passes gives that ordering without inventing a scoring model.
+ */
+function categoryFor(subject: string, from: string, body: string): Category {
+  const headline = `${subject} ${from}`;
+  return (
+    CATEGORY_RULES.find((rule) => rule.pattern.test(headline))?.category ??
+    CATEGORY_RULES.find((rule) => rule.pattern.test(body))?.category ??
+    "PRIMARY"
+  );
+}
+
+/** Very rough language guess. French is here because real mailboxes have it. */
+function guessLanguage(text: string): string {
+  const french =
+    /\b(vous|votre|nous|bonjour|merci|cordialement|avez|compte|données|réunion|pièce jointe)\b/i;
+  return french.test(text) ? "fr" : "en";
+}
+
+function isAutomated(metadata: Record<string, string>): boolean {
+  const from = metadata["from"] ?? "";
+  return /no-?reply|noreply|donotreply|notifications?@|mailer|bounce/i.test(from);
+}
+
+/**
+ * A deterministic classification for one email.
+ *
+ * Exported and pure so the tests can assert its properties (determinism, schema
+ * conformance, non-steerability) without a server.
+ */
+export function stubClassification(userContent: string): AiClassificationOutput {
+  const { metadata, body } = parsePrompt(userContent);
+  const subject = metadata["subject"] ?? "";
+  const from = metadata["from"] ?? "";
+
+  const category = categoryFor(subject, from, body);
+
+  /*
+   * Jitter keys on the envelope (sender + subject), never on the body.
+   *
+   * Body-derived jitter made the score move by a few points when text was appended,
+   * which was enough to cross a band boundary — so appending an injection payload
+   * appeared to change the verdict. It was not obeying the payload, but "the stub's
+   * answer shifted when the attacker added text" is indistinguishable from steering
+   * at a glance, and a dev tool used to demonstrate the defense must not have that
+   * property.
+   */
+  const envelope = `${from}|${subject}`;
+
+  /*
+   * Score from structure, not from what the email claims about itself. A question
+   * mark addressed to the mailbox owner moves the needle; the word "URGENT" in the
+   * body does not, because an attacker controls that and a stub that honoured it
+   * would quietly disagree with the defense the rest of the system assumes.
+   */
+  const automated = isAutomated(metadata);
+  const asksSomething = /\?/.test(body);
+  const owner = metadata["mailbox_owner"] ?? "";
+  const addressedDirectly = owner !== "" && (metadata["to"] ?? "").includes(owner);
+
+  let score = 35;
+  if (category === "WORK") score += 20;
+  if (category === "FINANCE") score += 25;
+  if (category === "NEWSLETTER" || category === "PROMOTION") score -= 22;
+  if (category === "NOTIFICATION") score -= 10;
+  if (automated) score -= 12;
+  if (asksSomething) score += 12;
+  if (addressedDirectly) score += 6;
+  // ±4 of stable jitter so scores are not all identical per category.
+  score += Math.round(hashUnit(envelope, "score") * 8) - 4;
+  const priorityScore = Math.max(0, Math.min(100, score));
+
+  const band =
+    priorityScore >= 80 ? "URGENT" : priorityScore >= 60 ? "HIGH" : priorityScore >= 30 ? "NORMAL" : "LOW";
+
+  return aiClassificationSchema.parse({
+    category,
+    priority: band,
+    priorityScore,
+    needsReply: asksSomething && !automated,
+    language: guessLanguage(`${subject} ${body}`),
+    confidence: Number((0.55 + hashUnit(envelope, "confidence") * 0.4).toFixed(2)),
+  });
+}
+
+/** First sentence of a block of text, trimmed to a sensible length. */
+function firstSentence(text: string, maxChars = 120): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  const end = cleaned.search(/[.!?](\s|$)/);
+  const sentence = end === -1 ? cleaned : cleaned.slice(0, end + 1);
+  return sentence.length > maxChars ? `${sentence.slice(0, maxChars - 1)}…` : sentence;
+}
+
+/** A deterministic summary for one thread. Schematic by design. */
+export function stubSummary(userContent: string): AiSummaryOutput {
+  const { metadata, bodies } = parsePrompt(userContent);
+  const subject = metadata["subject"] ?? "(no subject)";
+  const sender = (metadata["from"] ?? "someone").replace(/\s*<[^>]*>$/, "");
+  const count = Math.max(1, bodies.length);
+
+  const keyPoints = bodies
+    .slice(-4)
+    .map((body, index) => `Message ${index + 1}: ${firstSentence(body)}`)
+    .filter((point) => point.length > 12);
+
+  const asksSomething = bodies.some((body) => body.includes("?"));
+
+  return aiSummarySchema.parse({
+    headline: firstSentence(`${subject} — ${count} message${count === 1 ? "" : "s"}`, 90),
+    summary: `[stubbed summary] A thread of ${count} message${count === 1 ? "" : "s"} with ${sender}, subject "${subject}". This text is generated locally by the development AI stub and describes the thread's shape, not its meaning: no model read this mail.`,
+    keyPoints: keyPoints.length > 0 ? keyPoints : [`Subject: ${subject}`],
+    actionItems: asksSomething
+      ? [{ text: `Reply to ${sender} about "${firstSentence(subject, 60)}"`, owner: "user" }]
+      : [],
+  });
+}
+
+interface MessagesRequest {
+  model: string;
+  system: string;
+  messages: { role: string; content: string }[];
+  tools: { name: string }[];
+  tool_choice?: { name?: string };
+}
+
+/**
+ * Builds the Messages API response.
+ *
+ * Token counts are estimated from the request (~4 characters per token) so the
+ * usage ledger and the cost column hold realistic numbers rather than zeros —
+ * `AiUsage` is meant to be readable in development too.
+ */
+export function stubResponse(request: MessagesRequest): unknown {
+  const toolName = request.tool_choice?.name ?? request.tools[0]?.name ?? "unknown";
+  const userContent = request.messages.map((message) => message.content).join("\n");
+
+  const input =
+    toolName === "record_summary" ? stubSummary(userContent) : stubClassification(userContent);
+
+  const promptChars = request.system.length + userContent.length;
+  const outputChars = JSON.stringify(input).length;
+
+  return {
+    id: `msg_stub_${createHash("sha256").update(userContent).digest("hex").slice(0, 20)}`,
+    type: "message",
+    role: "assistant",
+    model: request.model,
+    content: [{ type: "tool_use", id: "toolu_stub", name: toolName, input }],
+    stop_reason: "tool_use",
+    stop_sequence: null,
+    usage: {
+      input_tokens: Math.ceil(promptChars / 4),
+      output_tokens: Math.ceil(outputChars / 4),
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    },
+  };
+}
+
+/**
+ * The stub HTTP server.
+ *
+ * Bound to 127.0.0.1 only: this answers "what does Claude think of this email"
+ * with a canned reply, and nothing outside the machine should be able to ask.
+ */
+export function createAiStubServer(): Server {
+  return createServer((req, res) => {
+    if (req.method !== "POST" || !req.url?.startsWith("/v1/messages")) {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ type: "error", error: { type: "not_found_error" } }));
+      return;
+    }
+
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      try {
+        const request = JSON.parse(body) as MessagesRequest;
+        const response = stubResponse(request);
+
+        logger.debug(
+          { model: request.model, tool: request.tool_choice?.name },
+          "ai stub answered",
+        );
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(response));
+      } catch (error) {
+        // Shaped like an Anthropic error so the SDK's own handling applies.
+        logger.error({ err: error }, "ai stub could not answer");
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            type: "error",
+            error: { type: "invalid_request_error", message: "stub could not parse the request" },
+          }),
+        );
+      }
+    });
+  });
+}
+
+export async function startAiStub(port: number = env.AI_STUB_PORT): Promise<Server> {
+  const server = createAiStubServer();
+  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+
+  logger.info(
+    { port, endpoint: `http://127.0.0.1:${port}` },
+    "ai stub listening: canned responses, no API key needed, nothing leaves this machine",
+  );
+  return server;
+}

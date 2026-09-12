@@ -231,20 +231,25 @@ export async function runEnrich(
 }
 
 /**
- * Queues enrichment for freshly written messages.
+ * Queues enrichment for the given messages.
  *
- * Called by the sync engine *after* the thread transaction commits: a job that
+ * Called by the sync engine *after* the thread transaction commits — a job that
  * starts before the rows exist would read nothing and fail, and enqueueing inside
- * the transaction would publish work that a rollback then invalidates.
+ * the transaction would publish work that a rollback then invalidates — and by the
+ * sweep, for messages that have no classification yet.
  *
- * Returns the number of jobs *submitted*, which is not always the number added:
- * BullMQ returns a job object for an id that already exists, so a re-enqueue of the
- * same messages collapses onto the queued jobs and still counts here.
+ * The job id is the message id, which dedupes *pending* work: a resync, or a user
+ * mashing a button, collapses onto the job already queued instead of paying for a
+ * second classification. It must not dedupe work that has already finished, though.
+ * BullMQ keeps completed and failed jobs for a while, and an id it still holds is an
+ * id it silently refuses to re-add — which would make the cap sweep a no-op for
+ * exactly the ten minutes after a capped run, the moment it is most needed. So a
+ * finished job's id is cleared first, and only pending ones are left alone.
  *
- * Failures here are logged, never thrown. A backfill that has correctly stored a
- * page of mail must not be failed because Redis hiccuped on the follow-up work —
- * the messages are on disk, and phase 5's sweep can find what has no
- * classification.
+ * Returns the number of jobs actually added. Failures are logged, never thrown: a
+ * backfill that has correctly stored a page of mail must not be failed because Redis
+ * hiccuped on the follow-up work — the messages are on disk, and the sweep will find
+ * anything that has no classification.
  */
 export async function enqueueEnrichment(input: {
   userId: string;
@@ -253,24 +258,58 @@ export async function enqueueEnrichment(input: {
 }): Promise<number> {
   if (input.messageIds.length === 0) return 0;
 
+  const log = logger.child({ userId: input.userId, mailAccountId: input.mailAccountId });
   const queue = aiEnrichQueue();
-  const jobs = input.messageIds.map((messageId) => ({
-    name: "enrich",
-    data: {
-      messageId,
-      mailAccountId: input.mailAccountId,
-      userId: input.userId,
-    } satisfies AiEnrichJob,
-    opts: { jobId: aiEnrichJobId(messageId) },
-  }));
 
   try {
-    await queue.addBulk(jobs);
+    const jobs: { name: string; data: AiEnrichJob; opts: { jobId: string } }[] = [];
+    let pending = 0;
+
+    for (const messageId of input.messageIds) {
+      const jobId = aiEnrichJobId(messageId);
+      const existing = await queue.getJob(jobId);
+
+      if (existing) {
+        const state = await existing.getState();
+        if (state === "waiting" || state === "active" || state === "delayed") {
+          // Already going to happen; adding it again would be a no-op anyway.
+          pending += 1;
+          continue;
+        }
+        // Completed or failed: the id is stale and is holding the slot.
+        try {
+          await existing.remove();
+        } catch (error) {
+          // A job that cannot be removed (locked by a worker mid-transition) is one
+          // whose work is happening regardless.
+          log.debug({ err: error, jobId }, "could not clear a finished enrich job");
+          pending += 1;
+          continue;
+        }
+      }
+
+      jobs.push({
+        name: "enrich",
+        data: {
+          messageId,
+          mailAccountId: input.mailAccountId,
+          userId: input.userId,
+        } satisfies AiEnrichJob,
+        opts: { jobId },
+      });
+    }
+
+    if (jobs.length > 0) await queue.addBulk(jobs);
+
+    if (pending > 0) {
+      log.debug({ queued: jobs.length, pending }, "some enrichment was already queued");
+    }
     return jobs.length;
   } catch (error) {
-    logger
-      .child({ userId: input.userId, mailAccountId: input.mailAccountId })
-      .error({ err: error, messages: jobs.length }, "failed to queue ai enrichment");
+    log.error(
+      { err: error, messages: input.messageIds.length },
+      "failed to queue ai enrichment",
+    );
     return 0;
   }
 }

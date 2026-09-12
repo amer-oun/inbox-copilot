@@ -50,11 +50,13 @@ const getJob = vi.hoisted(() => vi.fn());
 const add = vi.hoisted(() => vi.fn());
 /** Enrichment is queued after each page commits; §5's ai.enrich pipeline. */
 const enrichAddBulk = vi.hoisted(() => vi.fn());
+/** No existing job for a freshly written message. */
+const enrichGetJob = vi.hoisted(() => vi.fn());
 
 vi.mock("../lib/queues.js", () => ({
   syncBackfillQueue: () => ({ getJob, add }),
   backfillJobId: (id: string) => `backfill-${id}`,
-  aiEnrichQueue: () => ({ addBulk: enrichAddBulk }),
+  aiEnrichQueue: () => ({ addBulk: enrichAddBulk, getJob: enrichGetJob }),
   aiEnrichJobId: (id: string) => `enrich-${id}`,
   QUEUE_NAMES: { syncBackfill: "sync.backfill", aiEnrich: "ai.enrich" },
 }));
@@ -191,6 +193,7 @@ describe("runBackfill", () => {
     attachmentDeleteMany.mockReset().mockResolvedValue({ count: 0 });
     attachmentCreateMany.mockReset().mockResolvedValue({ count: 0 });
     enrichAddBulk.mockReset().mockResolvedValue([]);
+    enrichGetJob.mockReset().mockResolvedValue(null);
     stubTransaction();
   });
 

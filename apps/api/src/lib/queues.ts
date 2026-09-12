@@ -14,6 +14,7 @@ import { env } from "./env.js";
 export const QUEUE_NAMES = {
   syncBackfill: "sync.backfill",
   aiEnrich: "ai.enrich",
+  aiSweep: "ai.sweep",
 } as const;
 
 /**
@@ -41,6 +42,17 @@ export const aiEnrichJobSchema = z.object({
   userId: z.string().min(1),
 });
 export type AiEnrichJob = z.infer<typeof aiEnrichJobSchema>;
+
+/**
+ * The scheduled sweep for messages that were never enriched — capped, disabled at
+ * the time, or synced before the AI layer existed. No payload: it always means
+ * "look for work", and its schedule is defined at the worker.
+ */
+export const aiSweepJobSchema = z.object({
+  /** Per-user ceiling for one run; omitted means the service default. */
+  perUserLimit: z.number().int().min(1).max(5_000).optional(),
+});
+export type AiSweepJob = z.infer<typeof aiSweepJobSchema>;
 
 export const bullConnection: ConnectionOptions = {
   url: env.REDIS_URL,
@@ -89,8 +101,19 @@ export const ENRICH_JOB_OPTIONS: JobsOptions = {
   removeOnFail: { age: 7 * 24 * 3_600 },
 };
 
+/**
+ * How often the sweep runs. Half-hourly is frequent enough that a cap lifting at
+ * UTC midnight is picked up promptly, and cheap enough to ignore: when there is
+ * nothing unenriched it is one indexed query per user.
+ */
+export const AI_SWEEP_INTERVAL_MS = 30 * 60_000;
+
+/** Fixed scheduler id: upserting it means a redeploy re-uses it, not duplicates it. */
+export const AI_SWEEP_SCHEDULER_ID = "ai-sweep-every-30m";
+
 let backfillQueue: Queue<BackfillJob> | undefined;
 let enrichQueue: Queue<AiEnrichJob> | undefined;
+let sweepQueue: Queue<AiSweepJob> | undefined;
 
 /** Lazily constructed: importing this module must not open a connection. */
 export function syncBackfillQueue(): Queue<BackfillJob> {
@@ -132,8 +155,36 @@ export function aiEnrichJobId(messageId: string): string {
   return `enrich-${messageId}`;
 }
 
+export function aiSweepQueue(): Queue<AiSweepJob> {
+  sweepQueue ??= new Queue<AiSweepJob>(QUEUE_NAMES.aiSweep, {
+    connection: bullConnection,
+    defaultJobOptions: {
+      // A missed sweep is not worth retrying: the next one is 30 minutes away and
+      // will find the same work.
+      attempts: 1,
+      removeOnComplete: { age: 24 * 3_600, count: 50 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  return sweepQueue;
+}
+
+/**
+ * Registers the repeatable sweep. Idempotent: `upsertJobScheduler` with a fixed id
+ * replaces the existing schedule rather than adding a second one, so every worker
+ * boot converges on exactly one.
+ */
+export async function scheduleAiSweep(): Promise<void> {
+  await aiSweepQueue().upsertJobScheduler(
+    AI_SWEEP_SCHEDULER_ID,
+    { every: AI_SWEEP_INTERVAL_MS },
+    { name: "sweep", data: {} },
+  );
+}
+
 export async function closeQueues(): Promise<void> {
-  await Promise.all([backfillQueue?.close(), enrichQueue?.close()]);
+  await Promise.all([backfillQueue?.close(), enrichQueue?.close(), sweepQueue?.close()]);
   backfillQueue = undefined;
   enrichQueue = undefined;
+  sweepQueue = undefined;
 }

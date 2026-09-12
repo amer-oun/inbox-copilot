@@ -22,6 +22,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "ai:sweep": "pnpm --filter @inbox-copilot/api ai:sweep",
+    "ai:stub": "pnpm --filter @inbox-copilot/api ai:stub",
     "clean": "turbo run clean && rimraf node_modules",
     "db:generate": "pnpm --filter @inbox-copilot/db db:generate",
     "db:migrate": "pnpm --filter @inbox-copilot/db db:migrate",

@@ -63,6 +63,60 @@ export const MODELS = {
 - Tailwind only. No CSS modules, no styled-components.
 - Server Components by default in `apps/web`; `"use client"` only where interaction requires it.
 
+## AI in development (no API key needed)
+
+The AI layer talks to a local stub unless you give it a key. `pnpm dev` starts it
+alongside the api and worker; the whole enrich path — prompts, tool definitions,
+schema validation, content-hash cache, usage ledger, `ai.enrich` queue — runs
+unchanged, and nothing leaves the machine.
+
+```bash
+pnpm dev                    # api + worker + ai stub (port AI_STUB_PORT, default 4010)
+pnpm ai:sweep               # enqueue every message that has no classification
+pnpm ai:sweep --limit=10    # ...at most 10 per user
+pnpm ai:sweep --email=you@example.com
+pnpm ai:sweep --force       # ignore the remaining daily cap budget
+pnpm ai:stub                # the stub on its own
+```
+
+Watch it land: `pnpm db:studio`, then `AiClassification`, `AiSummary`, `AiUsage`, and
+the denormalized `category`/`priority`/`priorityScore`/`language` on `Thread`.
+
+Stubbed output is labelled, not disguised. Every startup logs `AI calls are STUBBED`,
+and each summary begins `[stubbed summary]`. Its categories are keyword heuristics
+over the subject and sender — deterministic, ignorant of instruction text in bodies
+(`devtools/aiStub.ts`), and **not** a signal of model quality.
+
+**Switching to the real API:** put a key in `ANTHROPIC_API_KEY` and restart. That is
+the whole switch — the stub refuses to start when a real key is set, and the client
+logs `AI calls go to the Anthropic API`. `ANTHROPIC_BASE_URL` overrides both (a
+gateway, or a stub on another host). In production, no key and no base URL is a
+startup error rather than a silent fallback, and a stub endpoint is refused outright.
+
+Already-stubbed rows are keyed by `contentHash` like any other, so they will be
+served from cache rather than re-asked. To re-enrich with the real model, delete the
+`AiClassification`/`AiSummary` rows (they are a cache, not a source of truth) and run
+`pnpm ai:sweep`.
+
+## Unenriched messages
+
+Enrichment is two calls — classify, then summarize the thread — so it can be left
+half-done: a spent daily cap, AI switched off, a dead worker, or a mailbox synced
+before this phase existed. `services/ai/sweep.ts` looks for both halves:
+
+- messages with no `AiClassification` row;
+- threads over the summary threshold with no `AiSummary` row. This one is raw SQL,
+  because "a body over 1500 characters" is a string-length predicate Prisma cannot
+  express — and skipping it would find almost nothing, since a real mailbox is mostly
+  single-message threads. Its tenancy predicate is therefore written out by hand.
+
+Each batch is trimmed to the user's remaining daily budget, counted in messages rather
+than calls, so a run can exceed a small cap by the number of summaries in flight (a
+cap of 10 measured 14 calls; at the default 500 the overshoot is noise). The cap check
+inside every call is the hard stop.
+
+It runs every 30 minutes on the worker and on demand via `pnpm ai:sweep`.
+
 ## Current phase
 > Phase 4 — AI core: DONE. `services/ai/` is the only path to a model.
 > `models.ts` pins model ids and prices (Haiku 4.5 classifies, Sonnet 5 summarizes);
@@ -80,6 +134,9 @@ export const MODELS = {
 > `enrich.ts` + the BullMQ `ai.enrich` queue process each new message after sync and
 > denormalize onto `Thread`. Threat fields stay UNKNOWN: §6 is deterministic-first
 > and lands in phase 9.
+> Development runs against a local stub (`devtools/aiStub.ts`) with no API key —
+> see "AI in development" above — and `services/ai/sweep.ts` + `pnpm ai:sweep`
+> re-enqueue anything left unclassified, on demand and every 30 minutes.
 > Next: Phase 5 — categorization UI, priority scoring, Batch API backfill
-> enrichment (which is also what sweeps up messages skipped by a spent cap).
+> enrichment (cheaper than the per-message sweep for a large re-enrichment).
 > Update this line as we progress.
