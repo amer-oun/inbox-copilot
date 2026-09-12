@@ -61,6 +61,35 @@ export class InternalError extends AppError {
   readonly code = "INTERNAL_ERROR";
 }
 
+/**
+ * A connected mailbox needs to be reconnected: the provider rejected our refresh
+ * token (`invalid_grant`) because the user revoked access, changed their
+ * password, or — on Microsoft — a concurrent refresh rotated it away.
+ *
+ * Retrying is pointless, so this is never retried: the mailbox is marked
+ * REVOKED and the UI prompts the user to reconnect.
+ */
+export class MailAccountRevokedError extends AppError {
+  readonly statusCode = 409;
+  readonly code = "MAIL_ACCOUNT_REVOKED";
+}
+
+/** A provider OAuth endpoint failed in a way that may be transient. */
+export class ProviderAuthError extends AppError {
+  readonly statusCode = 502;
+  readonly code = "PROVIDER_AUTH_FAILED";
+}
+
+/**
+ * Internal signal for an `invalid_grant` response. Thrown by `providers/*`,
+ * caught by the token manager, which turns it into MailAccountRevokedError after
+ * marking the row. It should never reach the error middleware.
+ */
+export class InvalidGrantError extends AppError {
+  readonly statusCode = 409;
+  readonly code = "INVALID_GRANT";
+}
+
 export function isAppError(error: unknown): error is AppError {
   return error instanceof AppError;
 }

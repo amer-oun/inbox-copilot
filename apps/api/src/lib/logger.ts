@@ -31,3 +31,38 @@ export const logger = pino({
 });
 
 export type Logger = typeof logger;
+
+/**
+ * Query parameters that must never be logged. An OAuth authorization code is a
+ * one-time credential and `state` is a CSRF token — both arrive in the URL of
+ * the callback, and pino-http logs request URLs by default.
+ */
+const SENSITIVE_QUERY_PARAMS = new Set([
+  "code",
+  "state",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "session_state",
+  "token",
+]);
+
+/** Replaces sensitive query values with a marker, keeping the shape readable. */
+export function redactUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+
+  const separator = url.indexOf("?");
+  if (separator === -1) return url;
+
+  const path = url.slice(0, separator);
+  const params = new URLSearchParams(url.slice(separator + 1));
+  for (const key of params.keys()) {
+    if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
+      params.set(key, "[redacted]");
+    }
+  }
+
+  const query = params.toString();
+  return query.length > 0 ? `${path}?${query}` : path;
+}
+

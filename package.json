@@ -26,7 +26,8 @@
     "db:generate": "pnpm --filter @inbox-copilot/db db:generate",
     "db:migrate": "pnpm --filter @inbox-copilot/db db:migrate",
     "db:deploy": "pnpm --filter @inbox-copilot/db db:deploy",
-    "db:studio": "pnpm --filter @inbox-copilot/db db:studio"
+    "db:studio": "pnpm --filter @inbox-copilot/db db:studio",
+    "secrets:generate": "node scripts/generate-secrets.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",

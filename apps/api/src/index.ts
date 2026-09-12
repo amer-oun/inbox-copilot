@@ -31,6 +31,19 @@ async function main(): Promise<void> {
 
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+
+  // Without these, Node prints the raw reason to stderr and exits — outside pino,
+  // so outside the redaction config. Routing them through the logger keeps every
+  // path that can print an error subject to the same rules, and a crash stays a
+  // crash: the process still exits non-zero rather than limping on.
+  process.on("uncaughtException", (error: Error) => {
+    logger.fatal({ err: error }, "uncaught exception");
+    process.exit(1);
+  });
+  process.on("unhandledRejection", (reason: unknown) => {
+    logger.fatal({ err: reason }, "unhandled promise rejection");
+    process.exit(1);
+  });
 }
 
 main().catch((error: unknown) => {

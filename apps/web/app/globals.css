@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+/*
+ * Tailwind v4: tokens are CSS variables registered with @theme, so they are
+ * available as utilities (bg-surface, text-muted, …). Tailwind only — no CSS
+ * modules, no styled-components.
+ */
+
+@theme {
+  --color-canvas: oklch(99% 0.004 260);
+  --color-surface: oklch(100% 0 0);
+  --color-border-subtle: oklch(92% 0.006 260);
+  --color-ink: oklch(24% 0.02 265);
+  --color-muted: oklch(52% 0.015 265);
+  --color-accent: oklch(52% 0.18 262);
+  --color-accent-ink: oklch(99% 0.005 262);
+  --color-danger: oklch(54% 0.19 25);
+  --color-warning: oklch(62% 0.14 75);
+  --color-success: oklch(56% 0.13 150);
+
+  --radius-card: 0.875rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-canvas: oklch(17% 0.015 265);
+    --color-surface: oklch(21% 0.018 265);
+    --color-border-subtle: oklch(30% 0.02 265);
+    --color-ink: oklch(96% 0.005 265);
+    --color-muted: oklch(72% 0.015 265);
+    --color-accent: oklch(70% 0.15 262);
+    --color-accent-ink: oklch(18% 0.02 262);
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Keyboard focus must stay visible everywhere. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}

@@ -19,6 +19,7 @@
     "@inbox-copilot/shared": "workspace:*",
     "express": "^5.1.0",
     "ioredis": "^5.8.2",
+    "jose": "^6.1.0",
     "pino": "^9.13.1",
     "pino-http": "^10.5.0",
     "zod": "^4.1.12"

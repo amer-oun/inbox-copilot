@@ -1,23 +1,65 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [".env"],
-  "globalEnv": ["NODE_ENV", "DATABASE_URL", "REDIS_URL", "PORT", "LOG_LEVEL"],
+  "globalDependencies": [
+    ".env"
+  ],
+  "globalEnv": [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "REDIS_URL",
+    "PORT",
+    "LOG_LEVEL",
+    "API_PUBLIC_URL",
+    "WEB_APP_URL",
+    "TOKEN_ENCRYPTION_KEY",
+    "TOKEN_ENCRYPTION_KEY_VERSION",
+    "OAUTH_STATE_SECRET",
+    "INTERNAL_JWT_PRIVATE_KEY",
+    "INTERNAL_JWT_PUBLIC_KEY",
+    "INTERNAL_JWT_ISSUER",
+    "INTERNAL_JWT_AUDIENCE",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "MICROSOFT_CLIENT_ID",
+    "MICROSOFT_CLIENT_SECRET",
+    "MICROSOFT_TENANT_ID",
+    "AUTH_SECRET",
+    "AUTH_URL",
+    "API_BASE_URL",
+    "AUTH_GOOGLE_ID",
+    "AUTH_GOOGLE_SECRET",
+    "AUTH_MICROSOFT_ENTRA_ID_ID",
+    "AUTH_MICROSOFT_ENTRA_ID_SECRET",
+    "AUTH_MICROSOFT_ENTRA_ID_TENANT"
+  ],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**"
+      ]
     },
     "dev": {
       "cache": false,
       "persistent": true,
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "lint": {},
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "db:generate": {
       "cache": false

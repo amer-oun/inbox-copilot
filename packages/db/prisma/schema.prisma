@@ -104,14 +104,19 @@ model MailAccount {
   emailAddress String
   displayName  String?
 
-  // encrypted token vault
-  accessTokenEnc  String?  @db.Text
-  refreshTokenEnc String?  @db.Text
-  tokenIv         String?
-  tokenAuthTag    String?
-  keyVersion      Int      @default(1)
-  tokenExpiresAt  DateTime?
-  scopes          String[]
+  // Encrypted token vault. Each ciphertext gets its own iv + authTag — a GCM
+  // nonce must never be reused across two encryptions under the same key.
+  // `keyVersion` covers both and exists so the key can be rotated.
+  accessTokenEnc     String?   @db.Text
+  accessTokenIv      String?
+  accessTokenAuthTag String?
+  refreshTokenEnc    String?   @db.Text
+  refreshTokenIv     String?
+  refreshTokenAuthTag String?
+  keyVersion         Int       @default(1)
+  tokenExpiresAt     DateTime?
+  tokenRefreshedAt   DateTime?
+  scopes             String[]
 
   // sync cursors — Gmail uses historyId, Graph uses a deltaLink URL
   syncCursor      String?   @db.Text

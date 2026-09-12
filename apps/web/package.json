@@ -1,0 +1,40 @@
+{
+  "name": "@inbox-copilot/web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- next dev --turbopack -p 3000",
+    "build": "dotenv -e ../../.env -v NODE_ENV=production -v SKIP_ENV_VALIDATION=1 -- next build",
+    "start": "dotenv -e ../../.env -v NODE_ENV=production -- next start -p 3000",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rimraf .next .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@auth/prisma-adapter": "^2.10.0",
+    "@inbox-copilot/db": "workspace:*",
+    "@inbox-copilot/shared": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "jose": "^6.1.0",
+    "lucide-react": "^0.545.0",
+    "next": "^15.5.4",
+    "next-auth": "^5.0.0-beta.29",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@inbox-copilot/config": "workspace:*",
+    "@tailwindcss/postcss": "^4.1.14",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "dotenv-cli": "^11.0.0",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^6.0.3"
+  }
+}
