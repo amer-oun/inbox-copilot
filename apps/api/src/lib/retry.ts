@@ -9,8 +9,9 @@ import { RateLimitError, UpstreamError } from "./errors.js";
  * the same mailbox, a quota change.
  *
  * Three rules that matter more than the curve:
- *   1. `Retry-After` wins. When a provider tells us when to come back, guessing
- *      earlier just burns more quota and extends the block.
+ *   1. `Retry-After` wins, and wins completely: it overrides the curve and its
+ *      30s ceiling, unjittered. Guessing earlier than the provider told us just
+ *      burns more quota and extends the block.
  *   2. There is a floor. Jitter is a multiplier applied *on top of* the delay, never
  *      a fraction of it — full jitter (`random() * delay`) produced 5ms retries,
  *      which is not a backoff, it is the same request again.
@@ -96,10 +97,64 @@ interface GoogleApiErrorish {
   message?: string;
   response?: {
     status?: number;
-    headers?: Record<string, string | string[] | undefined>;
+    /**
+     * `unknown` on purpose. Gaxios 7 is fetch-based, so this is a WHATWG
+     * `Headers` instance, not the plain record gaxios 6 gave us — typing it as a
+     * record is what let `headers["retry-after"]` compile and always miss.
+     */
+    headers?: unknown;
     data?: unknown;
   };
   errors?: { reason?: string; message?: string }[];
+}
+
+/**
+ * Reads one response header regardless of how the HTTP client represents them.
+ *
+ * Gaxios 7 hands back a WHATWG `Headers`: bracket access is `undefined` on it,
+ * `Object.keys` is `[]` and spreading it yields `{}` — which is why every failure
+ * logged `honoredRetryAfter: false` while the response carried `Retry-After: 47`.
+ * `instanceof Headers` is not a safe test either (it was false for the real error
+ * object, the class coming from a different realm), so this duck-types on `.get`.
+ *
+ * Plain objects are still handled: an undici/Node record, or a fixture, and with
+ * case-insensitive lookup because HTTP header names are case-insensitive and the
+ * lowercase spelling is a convention, not a guarantee.
+ */
+export function headerValue(headers: unknown, name: string): string | undefined {
+  if (headers === null || typeof headers !== "object") return undefined;
+
+  const getter = (headers as { get?: unknown }).get;
+  if (typeof getter === "function") {
+    const value = (getter as (key: string) => string | null).call(headers, name);
+    return value ?? undefined;
+  }
+
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    if (key.toLowerCase() !== wanted) continue;
+    const first = Array.isArray(value) ? value[0] : value;
+    return typeof first === "string" ? first : undefined;
+  }
+  return undefined;
+}
+
+/** Flattens any header representation into something loggable. */
+function headersToObject(headers: unknown): Record<string, string> | undefined {
+  if (headers === null || typeof headers !== "object") return undefined;
+
+  const entries = (headers as { entries?: unknown }).entries;
+  if (typeof entries === "function") {
+    return Object.fromEntries(
+      (entries as () => Iterable<[string, string]>).call(headers),
+    );
+  }
+
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers as Record<string, unknown>)) {
+    out[key] = Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  return out;
 }
 
 function asErrorish(error: unknown): GoogleApiErrorish {
@@ -124,6 +179,58 @@ export function reasonOf(error: unknown): string | undefined {
     return inner?.errors?.find((entry) => entry.reason !== undefined)?.reason;
   }
   return undefined;
+}
+
+/** Keys whose values never reach a log line, at any depth (rule 3). */
+const TOKEN_KEY = /(^|_|\.)(access_?token|refresh_?token|id_?token|authorization|bearer)$/i;
+
+/**
+ * Deep copy with token-shaped values censored.
+ *
+ * pino's redact wildcards only reach one level down, and a provider error body is
+ * arbitrarily nested, so the stripping happens here instead of in the transport.
+ * Nothing else is removed: the point of logging the body is to see all of it.
+ */
+function stripTokens(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((entry) => stripTokens(entry, depth + 1));
+
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = TOKEN_KEY.test(key) ? "[redacted]" : stripTokens(entry, depth + 1);
+  }
+  return out;
+}
+
+/**
+ * The provider's error body in full, for diagnostics.
+ *
+ * `reason` alone is not actionable: `rateLimitExceeded` is returned for several
+ * distinct causes — per-user rate, per-project rate, the daily quota, too many
+ * concurrent requests for one mailbox — which differ only in `error.message` and
+ * `error.errors[].message`, and each has a different fix. So the body goes to the
+ * log whole rather than being reduced to a status and a reason.
+ *
+ * Only the *response* is taken, never `config` or `request`: those carry the
+ * Authorization header. Token-shaped keys inside the body are censored anyway.
+ */
+export function errorBodyOf(error: unknown): Record<string, unknown> | undefined {
+  const e = asErrorish(error);
+  const body: Record<string, unknown> = {};
+
+  if (e.message !== undefined) body.message = e.message;
+  if (e.errors !== undefined) body.errors = stripTokens(e.errors);
+  if (e.response?.data !== undefined) body.data = stripTokens(e.response.data);
+  // Flattened first: a `Headers` instance serializes to `{}`, so logging it
+  // directly would have printed an empty object next to the body.
+  const responseHeaders = headersToObject(e.response?.headers);
+  if (responseHeaders !== undefined) {
+    // Rate-limit headers explain the quota that was hit; the request headers,
+    // which would carry the token, are not touched.
+    body.responseHeaders = stripTokens(responseHeaders);
+  }
+
+  return Object.keys(body).length > 0 ? body : undefined;
 }
 
 /**
@@ -153,8 +260,7 @@ export function isRetryable(error: unknown): boolean {
 
 /** Reads `Retry-After` in either of its RFC forms: delta-seconds or HTTP-date. */
 export function retryAfterMs(error: unknown, now: number = Date.now()): number | null {
-  const header = asErrorish(error).response?.headers?.["retry-after"];
-  const value = Array.isArray(header) ? header[0] : header;
+  const value = headerValue(asErrorish(error).response?.headers, "retry-after");
   if (value === undefined) return null;
 
   const seconds = Number(value);
@@ -215,12 +321,24 @@ export async function withRetry<T>(
       if (!isRetryable(error) || attempt === attempts) break;
 
       const serverAsked = retryAfterMs(error);
+      /*
+       * A Retry-After replaces the curve outright — it is not clamped to
+       * `maxDelayMs` and carries no jitter. The provider has told us when the
+       * window reopens; coming back before that is a guaranteed rejection that
+       * spends quota and extends the block, so "exponential to 30s" does not
+       * apply here and a 47s wait is honoured as 47s.
+       *
+       * Two bounds remain, and neither is the curve's:
+       *   - the floor, because `Retry-After: 0` is not an invitation to retry in
+       *     the same millisecond;
+       *   - `maxRetryAfterMs`, because a wait of minutes should not sit in-process
+       *     holding a worker slot — past that it belongs to the queue's own
+       *     job-level backoff, and the attempt fails so BullMQ reschedules it.
+       */
       const delay =
         serverAsked === null
           ? backoffDelayMs(attempt, { minDelayMs, maxDelayMs, random })
-          : // Even an explicit Retry-After is held to the floor: a provider saying
-            // "0" is not an invitation to retry in the same millisecond.
-            Math.max(minDelayMs, Math.min(serverAsked, maxRetryAfterMs));
+          : Math.max(minDelayMs, Math.min(serverAsked, maxRetryAfterMs));
 
       logger.warn(
         {
@@ -231,12 +349,26 @@ export async function withRetry<T>(
           status: statusOf(error),
           reason: reasonOf(error),
           honoredRetryAfter: serverAsked !== null,
+          providerError: errorBodyOf(error),
         },
         "provider call failed; backing off",
       );
 
       await sleep(delay, options.signal);
     }
+  }
+
+  if (!isAbortError(lastError) && !options.signal?.aborted) {
+    logger.warn(
+      {
+        label: options.label,
+        status: statusOf(lastError),
+        reason: reasonOf(lastError),
+        retryable: isRetryable(lastError),
+        providerError: errorBodyOf(lastError),
+      },
+      "provider call giving up",
+    );
   }
 
   throw toAppError(lastError, options.label);

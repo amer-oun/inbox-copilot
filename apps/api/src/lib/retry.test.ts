@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   backoffDelayMs,
+  headerValue,
   isRetryable,
   mapWithConcurrency,
   reasonOf,
@@ -16,21 +17,47 @@ import { AbortedError } from "./retry.js";
  */
 
 /** Shapes a googleapis error the way the library actually throws them. */
+/**
+ * Header representations a provider error can carry. `headers` is the default
+ * because it is what production sees: Gaxios 7 is fetch-based, so the real error
+ * holds a WHATWG `Headers`. The old plain-lowercase-record fixture is what let a
+ * broken `headers["retry-after"]` lookup pass this suite for a whole phase.
+ */
+type HeaderStyle = "headers" | "record" | "mixedCaseRecord" | "arrayRecord";
+
+function buildHeaders(style: HeaderStyle, retryAfter: string): unknown {
+  switch (style) {
+    case "headers":
+      return new Headers({ "retry-after": retryAfter, "x-ratelimit-limit": "250" });
+    case "record":
+      return { "retry-after": retryAfter };
+    case "mixedCaseRecord":
+      // HTTP header names are case-insensitive; the lowercase spelling is a
+      // client convention, not something the wire guarantees.
+      return { "Retry-After": retryAfter };
+    case "arrayRecord":
+      return { "retry-after": [retryAfter, "99"] };
+  }
+}
+
 function apiError(options: {
   status?: number;
   reason?: string;
   retryAfter?: string;
   code?: string;
+  headerStyle?: HeaderStyle;
 }): Error {
   const error = new Error(options.reason ?? `HTTP ${options.status ?? 500}`) as Error & {
     code?: string | number;
-    response?: { status?: number; headers?: Record<string, string>; data?: unknown };
+    response?: { status?: number; headers?: unknown; data?: unknown };
   };
   if (options.code !== undefined) error.code = options.code;
   if (options.status !== undefined || options.retryAfter !== undefined) {
     error.response = {
       ...(options.status === undefined ? {} : { status: options.status }),
-      ...(options.retryAfter === undefined ? {} : { headers: { "retry-after": options.retryAfter } }),
+      ...(options.retryAfter === undefined
+        ? {}
+        : { headers: buildHeaders(options.headerStyle ?? "headers", options.retryAfter) }),
       ...(options.reason === undefined
         ? {}
         : { data: { error: { errors: [{ reason: options.reason }] } } }),
@@ -98,6 +125,46 @@ describe("retryAfterMs", () => {
   it("returns null when the header is absent or unparseable", () => {
     expect(retryAfterMs(apiError({ status: 429 }))).toBeNull();
     expect(retryAfterMs(apiError({ status: 429, retryAfter: "soon" }))).toBeNull();
+  });
+
+  it("reads a WHATWG Headers instance, which is what Gaxios 7 actually sends", () => {
+    // Regression: bracket access on Headers is undefined, so this returned null
+    // for every real 429 while the fixtures said otherwise.
+    const error = apiError({ status: 429, retryAfter: "47", headerStyle: "headers" });
+    expect(retryAfterMs(error)).toBe(47_000);
+  });
+
+  it("is case-insensitive on a plain record", () => {
+    expect(
+      retryAfterMs(apiError({ status: 429, retryAfter: "12", headerStyle: "mixedCaseRecord" })),
+    ).toBe(12_000);
+  });
+
+  it("takes the first value when a record repeats the header", () => {
+    expect(
+      retryAfterMs(apiError({ status: 429, retryAfter: "8", headerStyle: "arrayRecord" })),
+    ).toBe(8_000);
+  });
+
+  it("treats a Headers miss as absent rather than as the string 'null'", () => {
+    const error = new Error("429") as Error & { response?: { headers?: unknown } };
+    error.response = { headers: new Headers({ "x-ratelimit-limit": "250" }) };
+    expect(retryAfterMs(error)).toBeNull();
+  });
+});
+
+describe("headerValue", () => {
+  it("reads through Headers, records and mixed casing alike", () => {
+    expect(headerValue(new Headers({ "retry-after": "5" }), "retry-after")).toBe("5");
+    expect(headerValue({ "Retry-After": "5" }, "retry-after")).toBe("5");
+    expect(headerValue({ "retry-after": ["5", "9"] }, "retry-after")).toBe("5");
+  });
+
+  it("is undefined for missing headers and non-objects", () => {
+    expect(headerValue(new Headers(), "retry-after")).toBeUndefined();
+    expect(headerValue(undefined, "retry-after")).toBeUndefined();
+    expect(headerValue(null, "retry-after")).toBeUndefined();
+    expect(headerValue("not headers", "retry-after")).toBeUndefined();
   });
 });
 
@@ -179,6 +246,50 @@ describe("withRetry", () => {
 
     await withRetry(fn, { label: "test", sleep, random: () => 1, minDelayMs: 1_000 });
     expect(sleep).toHaveBeenCalledWith(7_000, undefined);
+  });
+
+  it("waits longer than the 30s curve ceiling when Retry-After says so", async () => {
+    // The ceiling bounds the *curve*. A provider-supplied wait is not a guess to
+    // be capped: coming back at 30s when Gmail said 47 is a certain rejection.
+    const sleep = vi.fn(noSleep);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(apiError({ status: 429, retryAfter: "47" }))
+      .mockResolvedValue("ok");
+
+    await withRetry(fn, {
+      label: "test",
+      sleep,
+      minDelayMs: 1_000,
+      maxDelayMs: 30_000,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(47_000, undefined);
+  });
+
+  it("does not jitter a Retry-After", async () => {
+    // random() => 1 would add 50% to a curve delay; the server's number is exact.
+    const sleep = vi.fn(noSleep);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(apiError({ status: 429, retryAfter: "20" }))
+      .mockResolvedValue("ok");
+
+    await withRetry(fn, { label: "test", sleep, random: () => 1 });
+    expect(sleep).toHaveBeenCalledWith(20_000, undefined);
+  });
+
+  it("reports honoredRetryAfter for a real Headers instance", async () => {
+    // The symptom that exposed the bug was this flag reading false on every
+    // failure while the response carried the header.
+    const error = apiError({ status: 429, retryAfter: "47", headerStyle: "headers" });
+    const sleep = vi.fn(noSleep);
+    const fn = vi.fn().mockRejectedValueOnce(error).mockResolvedValue("ok");
+
+    await withRetry(fn, { label: "test", sleep });
+
+    // 47s is only reachable via the header: the curve's first delay is 1s.
+    expect(sleep).toHaveBeenCalledWith(47_000, undefined);
   });
 
   it("caps an absurd Retry-After rather than blocking the worker for an hour", async () => {
