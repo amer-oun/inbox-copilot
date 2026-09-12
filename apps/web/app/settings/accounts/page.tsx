@@ -1,11 +1,17 @@
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, Mail, ShieldAlert } from "lucide-react";
-import { mailAccountListSchema, type MailAccountDto } from "@inbox-copilot/shared";
+import { ArrowLeft, CheckCircle2, Mail, RefreshCw, ShieldAlert } from "lucide-react";
+import {
+  mailAccountListSchema,
+  syncStatusResponseSchema,
+  type MailAccountDto,
+  type SyncStatusResponse,
+} from "@inbox-copilot/shared";
 import { apiFetch } from "../../../lib/apiClient";
 import { requireSession } from "../../../lib/session";
 import {
   connectMailAccountAction,
   disconnectMailAccountAction,
+  syncMailAccountAction,
 } from "../../actions/mailAccounts";
 import { Button } from "../../../components/ui/button";
 import { Badge } from "../../../components/ui/badge";
@@ -28,6 +34,7 @@ interface AccountsPageProps {
     connected?: string;
     error?: string;
     disconnected?: string;
+    sync?: string;
   }>;
 }
 
@@ -58,14 +65,75 @@ function statusTone(account: MailAccountDto) {
   return "info";
 }
 
+/** Sync progress for one mailbox: counts, how far back, and the job's state. */
+function SyncProgress({ status }: { status: SyncStatusResponse | undefined }) {
+  if (!status) return null;
+
+  const job = status.job;
+
+  return (
+    <dl className="grid gap-x-6 gap-y-1 text-xs text-muted sm:grid-cols-[7rem_1fr]">
+      <dt>Synced</dt>
+      <dd className="text-ink">
+        {status.threadCount} thread{status.threadCount === 1 ? "" : "s"} ·{" "}
+        {status.messageCount} message{status.messageCount === 1 ? "" : "s"}
+      </dd>
+
+      {status.backfilledUntil ? (
+        <>
+          <dt>Back to</dt>
+          <dd className="text-ink">
+            {new Date(status.backfilledUntil).toLocaleDateString()}
+          </dd>
+        </>
+      ) : null}
+
+      {job ? (
+        <>
+          <dt>Job</dt>
+          <dd className="text-ink">
+            {job.state}
+            {job.threadsProcessed === null ? "" : ` · ${job.threadsProcessed} threads processed`}
+            {job.attemptsMade > 1 ? ` · attempt ${job.attemptsMade}` : ""}
+          </dd>
+        </>
+      ) : null}
+
+      {status.syncError ? (
+        <>
+          <dt>Last error</dt>
+          <dd className="text-danger">{status.syncError}</dd>
+        </>
+      ) : null}
+    </dl>
+  );
+}
+
 export default async function AccountsPage({ searchParams }: AccountsPageProps) {
   const session = await requireSession("/settings/accounts");
-  const { connected, error, disconnected } = await searchParams;
+  const { connected, error, disconnected, sync } = await searchParams;
 
   const { accounts } = await apiFetch(
     session.user.id,
     "/mail-accounts",
     mailAccountListSchema,
+  );
+
+  // Phase 2 shows progress rather than mail: the inbox UI lands in phase 3.
+  const syncStatuses = new Map<string, SyncStatusResponse>(
+    await Promise.all(
+      accounts.map(
+        async (account) =>
+          [
+            account.id,
+            await apiFetch(
+              session.user.id,
+              `/mail-accounts/${account.id}/sync-status`,
+              syncStatusResponseSchema,
+            ),
+          ] as const,
+      ),
+    ),
   );
 
   const errorMessage = error ? (CALLBACK_ERRORS[error] ?? CALLBACK_ERRORS["failed"]) : null;
@@ -130,6 +198,18 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
         </p>
       ) : null}
 
+      {sync ? (
+        <p
+          role="status"
+          className="mt-6 flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 p-3 text-sm text-accent"
+        >
+          <RefreshCw aria-hidden className="mt-0.5 size-4 shrink-0" />
+          {sync === "queued"
+            ? "Sync queued. The worker picks it up within seconds; progress appears below."
+            : "A sync is already running for that mailbox."}
+        </p>
+      ) : null}
+
       {errorMessage ? (
         <p
           role="alert"
@@ -173,12 +253,25 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
                 </CardContent>
               ) : null}
 
+              <CardContent className="pt-0">
+                <SyncProgress status={syncStatuses.get(account.id)} />
+              </CardContent>
+
               <CardFooter className="flex-wrap justify-between">
                 <p className="text-xs text-muted">
                   {account.scopes.length} scope
                   {account.scopes.length === 1 ? "" : "s"} granted
                 </p>
                 <div className="flex gap-2">
+                  {account.needsReconnect ? null : (
+                    <form action={syncMailAccountAction}>
+                      <input type="hidden" name="mailAccountId" value={account.id} />
+                      <Button type="submit" variant="outline" size="sm">
+                        <RefreshCw aria-hidden />
+                        Sync now
+                      </Button>
+                    </form>
+                  )}
                   {account.needsReconnect ? (
                     <form action={connectMailAccountAction}>
                       <input

@@ -1,0 +1,196 @@
+{
+  "id": "18f0a1b2c3d4e5f0",
+  "historyId": "998877",
+  "messages": [
+    {
+      "id": "18f0a1b2c3d4e5f6",
+      "threadId": "18f0a1b2c3d4e5f0",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL"
+      ],
+      "snippet": "Hi there — the invoice for March is attached, let me know if anything looks off.",
+      "internalDate": "1741003200000",
+      "payload": {
+        "mimeType": "multipart/mixed",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Delivered-To",
+            "value": "person@example.com"
+          },
+          {
+            "name": "Authentication-Results",
+            "value": "mx.google.com; dkim=pass header.i=@billing.acme.test header.s=s1; spf=pass (google.com: domain of accounts@billing.acme.test designates 10.1.2.3 as permitted sender) smtp.mailfrom=accounts@billing.acme.test; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=billing.acme.test"
+          },
+          {
+            "name": "Return-Path",
+            "value": "<bounce+7f2@billing.acme.test>"
+          },
+          {
+            "name": "From",
+            "value": "\"Acme Billing\" <accounts@billing.acme.test>"
+          },
+          {
+            "name": "To",
+            "value": "Person Example <person@example.com>, ops@example.com"
+          },
+          {
+            "name": "Cc",
+            "value": "\"Doe, Jane\" <jane@example.com>"
+          },
+          {
+            "name": "Reply-To",
+            "value": "support@billing.acme.test"
+          },
+          {
+            "name": "Subject",
+            "value": "Invoice 4471 for March"
+          },
+          {
+            "name": "Message-ID",
+            "value": "<CA+9x8Qz@mail.billing.acme.test>"
+          },
+          {
+            "name": "Date",
+            "value": "Mon, 03 Mar 2025 12:00:00 +0000"
+          },
+          {
+            "name": "X-Mailer",
+            "value": "AcmeMailer 3.1"
+          }
+        ],
+        "parts": [
+          {
+            "mimeType": "multipart/alternative",
+            "filename": "",
+            "headers": [],
+            "parts": [
+              {
+                "partId": "0.0",
+                "mimeType": "text/plain",
+                "filename": "",
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "text/plain; charset=\"UTF-8\""
+                  }
+                ],
+                "body": {
+                  "size": 96,
+                  "data": "SGkgdGhlcmUg4oCUIHRoZSBpbnZvaWNlIGZvciBNYXJjaCBpcyBhdHRhY2hlZC4NCg0KDQpMZXQgbWUga25vdyBpZiBhbnl0aGluZyBsb29rcyBvZmYuICAgDQoNCi0tIA0KQWNtZSBCaWxsaW5nDQo"
+                }
+              },
+              {
+                "partId": "0.1",
+                "mimeType": "text/html",
+                "filename": "",
+                "headers": [
+                  {
+                    "name": "Content-Type",
+                    "value": "text/html; charset=\"UTF-8\""
+                  }
+                ],
+                "body": {
+                  "size": 140,
+                  "data": "PGRpdj48cD5IaSB0aGVyZSDigJQgdGhlIGludm9pY2UgZm9yIE1hcmNoIGlzIGF0dGFjaGVkLjwvcD48cD5MZXQgbWUga25vdyBpZiBhbnl0aGluZyBsb29rcyBvZmYuPC9wPjxpbWcgc3JjPSJjaWQ6bG9nbzEiPjwvZGl2Pg"
+                }
+              }
+            ]
+          },
+          {
+            "partId": "1",
+            "mimeType": "image/png",
+            "filename": "logo.png",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "image/png"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "inline; filename=\"logo.png\""
+              },
+              {
+                "name": "Content-ID",
+                "value": "<logo1>"
+              }
+            ],
+            "body": {
+              "size": 2048,
+              "attachmentId": "ANGjdJ_logo"
+            }
+          },
+          {
+            "partId": "2",
+            "mimeType": "application/pdf",
+            "filename": "invoice-4471.pdf",
+            "headers": [
+              {
+                "name": "Content-Type",
+                "value": "application/pdf"
+              },
+              {
+                "name": "Content-Disposition",
+                "value": "attachment; filename=\"invoice-4471.pdf\""
+              }
+            ],
+            "body": {
+              "size": 88213,
+              "attachmentId": "ANGjdJ_pdf"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "18f0a1b2c3d4e601",
+      "threadId": "18f0a1b2c3d4e5f0",
+      "labelIds": [
+        "SENT"
+      ],
+      "snippet": "Thanks — paid this morning.",
+      "internalDate": "1741089600000",
+      "payload": {
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": [
+          {
+            "name": "From",
+            "value": "Person Example <person@example.com>"
+          },
+          {
+            "name": "To",
+            "value": "\"Acme Billing\" <accounts@billing.acme.test>"
+          },
+          {
+            "name": "Subject",
+            "value": "Re: Invoice 4471 for March"
+          },
+          {
+            "name": "Message-ID",
+            "value": "<reply-001@mail.example.com>"
+          },
+          {
+            "name": "In-Reply-To",
+            "value": "<CA+9x8Qz@mail.billing.acme.test>"
+          },
+          {
+            "name": "References",
+            "value": "<CA+9x8Qz@mail.billing.acme.test>"
+          },
+          {
+            "name": "Date",
+            "value": "Tue, 04 Mar 2025 12:00:00 +0000"
+          }
+        ],
+        "body": {
+          "size": 28,
+          "data": "VGhhbmtzIOKAlCBwYWlkIHRoaXMgbW9ybmluZy4K"
+        }
+      }
+    }
+  ]
+}

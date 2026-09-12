@@ -1,0 +1,84 @@
+{
+  "id": "18f0aaaaaaaaaaa1",
+  "historyId": "998900",
+  "messages": [
+    {
+      "id": "18f0aaaaaaaaaaa2",
+      "threadId": "18f0aaaaaaaaaaa1",
+      "labelIds": [
+        "INBOX",
+        "UNREAD"
+      ],
+      "snippet": "Your account will be suspended",
+      "internalDate": "1741176000000",
+      "payload": {
+        "mimeType": "multipart/mixed",
+        "filename": "",
+        "headers": [
+          {
+            "name": "Authentication-Results",
+            "value": "mx.google.com; dkim=fail header.i=@paypa1.test; spf=softfail (google.com: domain of transitioning bounce@paypa1.test) smtp.mailfrom=bounce@paypa1.test; dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=paypa1.test"
+          },
+          {
+            "name": "From",
+            "value": "\"billing@paypal.com\" <no-reply@paypa1.test>"
+          },
+          {
+            "name": "To",
+            "value": "person@example.com"
+          },
+          {
+            "name": "Subject",
+            "value": "Action required: your account will be suspended"
+          },
+          {
+            "name": "Message-ID",
+            "value": "<phish-1@paypa1.test>"
+          }
+        ],
+        "parts": [
+          {
+            "partId": "0",
+            "mimeType": "text/html",
+            "filename": "",
+            "headers": [],
+            "body": {
+              "size": 120,
+              "data": "PGh0bWw-PGJvZHk-PHN0eWxlPnB7Y29sb3I6cmVkfTwvc3R5bGU-PHA-WW91ciBhY2NvdW50IHdpbGwgYmUgPGI-c3VzcGVuZGVkPC9iPi48L3A-PGEgaHJlZj0iaHR0cDovL3BheXBhMS50ZXN0L3ZlcmlmeSI-VmVyaWZ5IG5vdzwvYT48L2JvZHk-PC9odG1sPg"
+            }
+          },
+          {
+            "partId": "1",
+            "mimeType": "application/zip",
+            "filename": "invoice.zip",
+            "headers": [
+              {
+                "name": "Content-Disposition",
+                "value": "attachment; filename=\"invoice.zip\""
+              }
+            ],
+            "body": {
+              "size": 4096,
+              "attachmentId": "ANGjdJ_zip"
+            }
+          },
+          {
+            "partId": "2",
+            "mimeType": "application/octet-stream",
+            "filename": "update.exe",
+            "headers": [
+              {
+                "name": "Content-Disposition",
+                "value": "attachment; filename=\"update.exe\""
+              }
+            ],
+            "body": {
+              "size": 51200,
+              "attachmentId": "ANGjdJ_exe"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

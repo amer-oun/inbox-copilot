@@ -6,6 +6,7 @@ import {
   connectMailAccountResponseSchema,
   disconnectMailAccountResponseSchema,
   providerSlugSchema,
+  startSyncResponseSchema,
   type ProviderSlug,
 } from "@inbox-copilot/shared";
 import { apiFetch } from "../../lib/apiClient";
@@ -56,3 +57,23 @@ export async function disconnectMailAccountAction(formData: FormData): Promise<v
       : "/settings/accounts?disconnected=manual",
   );
 }
+
+/**
+ * Queues a backfill for one mailbox. The API is idempotent per mailbox, so a
+ * double click reports "already running" rather than syncing twice.
+ */
+export async function syncMailAccountAction(formData: FormData): Promise<void> {
+  const session = await requireSession("/settings/accounts");
+  const mailAccountId = z.string().min(1).parse(formData.get("mailAccountId"));
+
+  const result = await apiFetch(
+    session.user.id,
+    `/mail-accounts/${mailAccountId}/sync`,
+    startSyncResponseSchema,
+    { method: "POST" },
+  );
+
+  revalidatePath("/settings/accounts");
+  redirect(result.enqueued ? "/settings/accounts?sync=queued" : "/settings/accounts?sync=running");
+}
+

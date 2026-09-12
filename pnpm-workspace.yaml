@@ -7,3 +7,6 @@ allowBuilds:
   "@prisma/engines": true
   "prisma": true
   "esbuild": true
+  # BullMQ pulls msgpackr, whose optional native accelerator needs a compiler.
+  # The pure-JS path is correct and fast enough for job payloads, so skip it.
+  "msgpackr-extract": false

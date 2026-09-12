@@ -5,6 +5,8 @@ import {
   disconnectMailAccountResponseSchema,
   mailAccountIdParamsSchema,
   mailAccountListSchema,
+  startSyncResponseSchema,
+  syncStatusResponseSchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
 import {
@@ -12,6 +14,7 @@ import {
   listMailAccounts,
   startMailAccountConnect,
 } from "../services/mailAccounts.js";
+import { getSyncStatus, startBackfill } from "../services/sync.js";
 
 /**
  * Mailbox management, called by the Next.js BFF with an internal JWT.
@@ -45,3 +48,23 @@ mailAccountsRouter.delete("/mail-accounts/:mailAccountId", async (req, res) => {
   const outcome = await disconnectMailAccount({ userId, mailAccountId });
   res.status(200).json(disconnectMailAccountResponseSchema.parse(outcome));
 });
+
+/**
+ * Triggers a backfill. Idempotent by job id: a second call while one is running
+ * reports `enqueued: false` rather than queueing a duplicate pass (lib/queues.ts).
+ */
+mailAccountsRouter.post("/mail-accounts/:mailAccountId/sync", async (req, res) => {
+  const { id: userId } = currentUser(req);
+  const { mailAccountId } = mailAccountIdParamsSchema.parse(req.params);
+
+  const result = await startBackfill({ userId, mailAccountId });
+  res.status(202).json(startSyncResponseSchema.parse(result));
+});
+
+mailAccountsRouter.get("/mail-accounts/:mailAccountId/sync-status", async (req, res) => {
+  const { id: userId } = currentUser(req);
+  const { mailAccountId } = mailAccountIdParamsSchema.parse(req.params);
+
+  res.json(syncStatusResponseSchema.parse(await getSyncStatus({ userId, mailAccountId })));
+});
+

@@ -1,0 +1,14 @@
+{
+  "id": "18f0bbbbbbbbbbb1",
+  "messages": [
+    {
+      "id": "18f0bbbbbbbbbbb2",
+      "threadId": "18f0bbbbbbbbbbb1",
+      "payload": {
+        "mimeType": "text/plain",
+        "filename": "",
+        "headers": []
+      }
+    }
+  ]
+}
