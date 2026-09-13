@@ -41,16 +41,59 @@ const ALLOWED_TAGS = [
  * below with our own values rather than the sender's.
  */
 const ALLOWED_ATTR = [
-  "align", "alt", "bgcolor", "border", "cellpadding", "cellspacing", "class",
-  "colspan", "color", "dir", "face", "height", "href", "hreflang", "lang",
-  "rowspan", "size", "span", "src", "style", "title", "valign", "width",
+  "align", "alt", "background", "bgcolor", "border", "cellpadding", "cellspacing",
+  "class", "colspan", "color", "dir", "face", "height", "href", "hreflang", "lang",
+  "poster", "rowspan", "size", "span", "src", "srcset", "style", "title", "valign",
+  "width",
 ];
 
-/** URL schemes a link or image may use. `javascript:` is absent, obviously. */
-const ALLOWED_URI_REGEXP = /^(?:https?|mailto|tel|cid|data:image\/(?:png|jpe?g|gif|webp|avif))/i;
+/**
+ * URL schemes a link or image may use. `javascript:` is absent, obviously.
+ *
+ * `//host/path` is allowed through on purpose: it is remote, and the hook below
+ * defuses it. Rejecting it here instead would delete the URL, and then
+ * click-to-load would have nothing to restore.
+ */
+const ALLOWED_URI_REGEXP =
+  /^(?:https?:|mailto:|tel:|cid:|data:image\/(?:png|jpe?g|gif|webp|avif)|\/\/)/i;
+
+/**
+ * Presentational attributes, declared as *not* URIs.
+ *
+ * This matters more than it looks. DOMPurify checks every attribute that is not on
+ * its URI-safe list against `ALLOWED_URI_REGEXP`, so overriding that regexp without
+ * this list silently deletes `bgcolor="#ffffff"`, `width="600"` and `align="center"`
+ * — the entire visual layer of a 1998-style email — because "#ffffff" is not a URL.
+ * With the default regexp they survive by accident; that accident is not a design.
+ */
+const URI_SAFE_ATTR = [
+  "align", "bgcolor", "border", "cellpadding", "cellspacing", "color", "colspan",
+  "face", "height", "hreflang", "rowspan", "size", "span", "valign", "width",
+];
 
 /** Attributes that can pull remote content, and must be defused. */
 const REMOTE_SOURCE_ATTRS = ["src", "srcset", "background", "poster"] as const;
+
+/**
+ * The part of a DOM element this hook touches.
+ *
+ * Named here because the API is a Node project with no `lib.dom`: DOMPurify's own
+ * hook types reference `Element`, which does not exist in this compilation. Listing
+ * the four methods used is also a precise statement of how much DOM this code needs.
+ */
+interface SanitizerNode {
+  tagName: string;
+  getAttribute(name: string): string | null;
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+  hasAttribute(name: string): boolean;
+}
+
+/** DOMPurify's hook registry, typed for the one hook we register. */
+const hooks = DOMPurify as unknown as {
+  addHook(name: "afterSanitizeAttributes", hook: (node: SanitizerNode) => void): void;
+  removeHook(name: "afterSanitizeAttributes"): void;
+};
 
 export interface SanitizedHtml {
   html: string;
@@ -86,7 +129,7 @@ export function sanitizeEmailHtml(html: string | null): SanitizedHtml | null {
 
   let blockedRemoteImages = 0;
 
-  const onAttribute = (node: Element): void => {
+  const onAttribute = (node: SanitizerNode): void => {
     for (const attribute of REMOTE_SOURCE_ATTRS) {
       const value = node.getAttribute(attribute);
       if (value === null) continue;
@@ -109,7 +152,7 @@ export function sanitizeEmailHtml(html: string | null): SanitizedHtml | null {
     if (style !== null && /url\(/i.test(style)) {
       const cleaned = style.replace(
         /url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi,
-        (match, _quote: string, url: string) => (isRemoteUrl(url) ? "none" : match),
+        (match: string, _quote: string, url: string) => (isRemoteUrl(url) ? "none" : match),
       );
       if (cleaned !== style) {
         node.setAttribute("style", cleaned);
@@ -125,14 +168,21 @@ export function sanitizeEmailHtml(html: string | null): SanitizedHtml | null {
     }
   };
 
-  DOMPurify.addHook("afterSanitizeAttributes", onAttribute);
+  hooks.addHook("afterSanitizeAttributes", onAttribute);
 
   try {
     const clean = DOMPurify.sanitize(html, {
       ALLOWED_TAGS,
       ALLOWED_ATTR,
       ALLOWED_URI_REGEXP,
-      // Adding these back after sanitization is what the hook above does.
+      ADD_URI_SAFE_ATTR: URI_SAFE_ATTR,
+      /*
+       * `target`/`rel` are set by the hook, after sanitization, so they must be
+       * permitted here. `data-blocked-*` is deliberately NOT permitted: an
+       * attribute the hook adds survives (it runs after filtering), while one a
+       * *sender* supplies is stripped — so nobody can pre-plant a URL that
+       * click-to-load would later honour.
+       */
       ADD_ATTR: ["target", "rel"],
       // `<style>` blocks and their contents go entirely: they are a CSS injection
       // surface and can load remote fonts and images.
@@ -154,6 +204,6 @@ export function sanitizeEmailHtml(html: string | null): SanitizedHtml | null {
   } finally {
     // Hooks are global state; leaving this registered would leak into every
     // later sanitize call in the process.
-    DOMPurify.removeHook("afterSanitizeAttributes");
+    hooks.removeHook("afterSanitizeAttributes");
   }
 }

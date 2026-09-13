@@ -161,8 +161,12 @@ describe("remote content, the tracking-pixel problem", () => {
         <img src="https://track.example/open.gif?id=1" width="1" height="1">
       </td></tr></table>`);
 
+    // Three images; the td background is defused too but is not an <img>.
     expect(result?.blockedRemoteImages).toBe(3);
-    expect(result?.html).not.toContain("https://cdn.example/logo.png\"");
+    // Nothing remote is loadable: no src/background attribute survives at all.
+    expect(result?.html).not.toMatch(/\ssrc="https?:/);
+    expect(result?.html).not.toMatch(/\sbackground=/);
+    expect(result?.html).toContain("data-blocked-background");
   });
 });
 
@@ -235,13 +239,27 @@ describe("edge cases", () => {
     expect(sanitizeEmailHtml('<img src="https://b.example/2.png">')?.blockedRemoteImages).toBe(1);
   });
 
-  it("is idempotent: sanitizing twice changes nothing", () => {
-    const once = clean('<p>hi</p><img src="https://a.example/1.png"><script>x</script>');
-    expect(clean(once)).toBe(once);
+  it("strips a sender-supplied data-blocked-src", () => {
+    /*
+     * Only the hook may create these, and it runs after attribute filtering. A
+     * sender who plants one would otherwise be handing click-to-load a URL of
+     * their choosing — and inflating the "N images blocked" count with it.
+     */
+    const result = sanitizeEmailHtml('<img data-blocked-src="https://evil.example/p.gif">');
+
+    expect(result?.html).not.toContain("evil.example");
+    expect(result?.blockedRemoteImages).toBe(0);
+  });
+
+  it("is lossy on a second pass, which is why bodies are sanitized once", () => {
+    // A consequence of the rule above: re-sanitizing drops the stashed URLs. The
+    // API sanitizes stored raw HTML on read and never re-sanitizes its own output.
+    const once = clean('<img src="https://a.example/1.png">');
+    expect(once).toContain("data-blocked-src");
+    expect(clean(once)).not.toContain("data-blocked-src");
   });
 
   it("handles a body that is only a tracking pixel", () => {
-    const result = sanitizeEmailHtml('<img src="https://track.example/p.gif">');
-    expect(result?.blockedRemoteImages).toBe(1);
+    expect(blocked('<img src="https://track.example/p.gif">')).toBe(1);
   });
 });

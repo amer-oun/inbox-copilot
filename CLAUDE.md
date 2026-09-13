@@ -117,26 +117,55 @@ inside every call is the hard stop.
 
 It runs every 30 minutes on the worker and on demand via `pnpm ai:sweep`.
 
+## Rendering email HTML
+
+Three independent layers, because each is assumed to fail:
+
+1. **Sanitize** (`apps/api/src/services/security/sanitize.ts`). DOMPurify with a
+   narrow allowlist, applied on read rather than on write — the stored row keeps what
+   the sender sent, and only cleaned HTML crosses the wire. The DTO field is called
+   `bodyHtmlSanitized` so nothing downstream can reach for raw HTML: there is none.
+   Remote sources are *moved* to `data-blocked-*`, not deleted, so click-to-load has
+   something to restore and the UI can count what is waiting.
+2. **Sandbox** (`apps/web/lib/emailFrame.ts`). The body renders in an iframe with
+   `sandbox="allow-popups allow-popups-to-escape-sandbox"` — no scripts, no
+   same-origin, no forms, no top navigation. Popups are the one concession, and only
+   so that clicking a link works.
+3. **CSP inside the frame**: `default-src 'none'`, and `img-src` stays `data:` until
+   the reader asks for images. That is what makes "images blocked" true rather than
+   decorative, and it is why a tracking pixel cannot report that a message was opened.
+
+The frame does not auto-size. Measuring content height needs script *inside* the
+frame, and `allow-scripts` is the flag this app will not grant to sender-authored
+HTML — so the frame scrolls and the reader can expand it.
+
+When changing `ALLOWED_URI_REGEXP`, add presentational attributes to
+`ADD_URI_SAFE_ATTR` too: DOMPurify URI-checks every attribute that is not on that
+list, so a strict regexp silently deletes `bgcolor="#ffffff"` and `width="600"`.
+
+## Known: dev mode puts server secrets in the RSC payload
+
+In `next dev` only, React 19's async debug info serializes awaited server values into
+the Flight stream — including the internal JWT minted by `lib/apiClient.ts` and the
+Auth.js session row. Verified absent from `next build && next start` output. The
+browser already holds its own session cookie and the JWT lives 60 seconds, so the
+practical gain to an attacker is nil, but do not screen-share or record dev
+`view-source` output, and do not mistake it for a production leak.
+
 ## Current phase
-> Phase 4 — AI core: DONE. `services/ai/` is the only path to a model.
-> `models.ts` pins model ids and prices (Haiku 4.5 classifies, Sonnet 5 summarizes);
-> `prompts.ts` is the §7 boundary — email content only ever reaches the model inside
-> `<untrusted_email>` in a user turn, delimiters in content are defanged, and the
-> system prompt comes from a registry callers cannot pass a string into.
-> `client.ts` offers exactly one data-returning tool with `tool_choice` pinned and
-> parses the reply by validating the tool input against a Zod schema in
-> `packages/shared/src/schemas/ai.ts` — no prose fallback. `cache.ts` checks
-> `contentHash` in `AiClassification`/`AiSummary` before every call; `usage.ts`
-> writes `AiUsage` (tokens + cost) and enforces `UserSettings.dailyAiCallCap` in a
-> UTC window. `classify.ts` returns category/priority/priorityScore/needsReply/
-> language, with the score deciding the band when the model contradicts itself;
-> `summarize.ts` runs for threads of 3+ messages or bodies over 1500 chars.
-> `enrich.ts` + the BullMQ `ai.enrich` queue process each new message after sync and
-> denormalize onto `Thread`. Threat fields stay UNKNOWN: §6 is deterministic-first
-> and lands in phase 9.
-> Development runs against a local stub (`devtools/aiStub.ts`) with no API key —
-> see "AI in development" above — and `services/ai/sweep.ts` + `pnpm ai:sweep`
-> re-enqueue anything left unclassified, on demand and every 30 minutes.
-> Next: Phase 5 — categorization UI, priority scoring, Batch API backfill
-> enrichment (cheaper than the per-message sweep for a large re-enrichment).
+> Phase 5 — Inbox UI: DONE. `GET /threads?category=&cursor=&limit=` and
+> `GET /threads/:id` in `apps/api` (`routes/threads.ts`, `services/threads.ts`),
+> tenant-filtered, read-only. The list sorts by `priorityScore DESC NULLS LAST`,
+> then `lastMessageAt`, then `id`, and pages with a keyset cursor over that triple
+> — offset would drop or repeat rows, because the enrichment worker is still
+> rewriting the scores the list is sorted by.
+> `apps/web`: `/inbox/[category]` (tabs from the Category enum) and `/thread/[id]`,
+> Server Components throughout except the infinite list and the message bodies.
+> TanStack Query loads later pages through the BFF proxy at
+> `/api/proxy/[...path]`, which is GET-only and path-allowlisted.
+> Email HTML rendering is described under "Rendering email HTML" above — read that
+> before touching it.
+> Next: Phase 6 — replies. Smart reply variants, tone selector, writing-style
+> profile, send via the provider (and rule 1 still holds: drafts only, sending is a
+> separate user-initiated call).
 > Update this line as we progress.

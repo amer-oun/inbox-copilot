@@ -4,6 +4,7 @@ import { logger, redactUrl } from "./lib/logger.js";
 import { healthRouter } from "./routes/health.js";
 import { mailAccountsRouter } from "./routes/mailAccounts.js";
 import { oauthRouter } from "./routes/oauth.js";
+import { threadsRouter } from "./routes/threads.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 
 export function createApp(): Express {
@@ -36,6 +37,7 @@ export function createApp(): Express {
   // (authenticated by the internal JWT).
   app.use(oauthRouter);
   app.use(mailAccountsRouter);
+  app.use(threadsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
