@@ -26,6 +26,7 @@
     "express": "^5.1.0",
     "googleapis": "^180.0.0",
     "ioredis": "^5.8.2",
+    "isomorphic-dompurify": "^4.2.0",
     "jose": "^6.1.0",
     "pino": "^9.13.1",
     "pino-http": "^10.5.0",
