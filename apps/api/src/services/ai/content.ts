@@ -24,6 +24,30 @@ export const MAX_THREAD_CHARS = 40_000;
 export const SUMMARY_MIN_MESSAGES = 3;
 export const SUMMARY_MIN_BODY_CHARS = 1_500;
 
+/**
+ * The columns a prompt is built from.
+ *
+ * Here rather than at each caller so that "what the AI layer reads out of a message"
+ * is one list: bodies are read for prompting and are never logged, and a column
+ * added to `Message` does not silently start appearing in prompts.
+ */
+export const MESSAGE_PROMPT_SELECT = {
+  id: true,
+  subject: true,
+  fromName: true,
+  fromEmail: true,
+  to: true,
+  cc: true,
+  replyTo: true,
+  sentAt: true,
+  bodyText: true,
+  bodyHtml: true,
+  snippet: true,
+  isOutbound: true,
+  hasAttachments: true,
+  contentHash: true,
+} as const;
+
 export interface MessageForPrompt {
   id: string;
   subject: string | null;

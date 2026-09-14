@@ -14,6 +14,7 @@ import {
   type BackfillJob,
 } from "../lib/queues.js";
 import { enqueueEnrichment } from "./ai/enrich.js";
+import { enqueueStyleProfile } from "./ai/style.js";
 import { fetchThreads } from "../providers/gmail/client.js";
 import { mailProviderFor } from "../providers/registry.js";
 import { threadParticipants } from "../providers/gmail/map.js";
@@ -360,6 +361,14 @@ export async function runBackfill(
         ...(historyCursor === null ? {} : { syncCursor: historyCursor }),
       },
     });
+
+    /*
+     * The writing-style profile (§5) is built from sent mail, so this is the first
+     * moment there is anything to build it from. Queued, not awaited: the backfill is
+     * already complete, and a model call here would make "mailbox is active" wait on
+     * a quality feature.
+     */
+    await enqueueStyleProfile({ userId: job.userId });
 
     log.info(
       { ...progress, cursor: historyCursor, resumed: resuming },

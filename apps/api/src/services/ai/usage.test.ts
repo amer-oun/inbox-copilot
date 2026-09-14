@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { costUsd, MODELS, PRICING } from "./models.js";
+import type { AiSettings } from "./usage.js";
 
 /**
  * The ledger, the cap, and the arithmetic behind both.
@@ -30,11 +31,12 @@ const {
 } = await import("./usage.js");
 
 const USER_ID = "user_1";
-const SETTINGS = {
+const SETTINGS: AiSettings = {
   aiEnabled: true,
   autoSummarize: true,
   autoCategorize: true,
   dailyAiCallCap: 500,
+  defaultTone: "PROFESSIONAL",
 };
 
 beforeEach(() => {

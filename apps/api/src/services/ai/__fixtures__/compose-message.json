@@ -1,0 +1,25 @@
+{
+  "id": "msg_01ComposeRecorded000000001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01Compose",
+      "name": "record_composed_message",
+      "input": {
+        "subject": "Renewal timing for the Northwind licences",
+        "body": "Hi Dana,\n\nWe're coming up to the renewal on the Northwind licences and I'd like to line the dates up with your budget cycle rather than the anniversary date. Would starting the new term on [date] work on your side?\n\nHappy to send a revised quote once you confirm.\n\nBest,\nSam"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1210,
+    "output_tokens": 154,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

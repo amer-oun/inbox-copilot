@@ -1,0 +1,27 @@
+{
+  "id": "msg_01StyleRecorded00000000001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01Style",
+      "name": "record_writing_style",
+      "input": {
+        "greeting": "Hi <name>,",
+        "signOff": "Best,\nSam",
+        "formality": "neutral",
+        "descriptor": "Writes short, decided messages: two or three sentences, one idea each, and a line break between them. Leads with the answer rather than context, and only explains when asked. Asks for things directly (\"can you confirm\") without softeners, but softens refusals with a reason and a date. No exclamation marks, no emoji, occasional em dash. Signs off the same way every time."
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 8450,
+    "output_tokens": 198,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

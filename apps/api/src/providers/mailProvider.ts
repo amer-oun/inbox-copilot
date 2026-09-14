@@ -121,8 +121,20 @@ export interface OutboundMessage {
   subject: string;
   bodyHtml: string;
   bodyText?: string;
-  /** Set when replying: the provider thread and the Message-ID to reference. */
-  inReplyTo?: { providerThreadId: string; internetMessageId: string };
+  /**
+   * Set when replying.
+   *
+   * `references` is the `References` chain to emit, oldest first. A caller that
+   * already ends it with the parent's Message-ID (as `services/send.ts` does) gets it
+   * emitted as-is; one that omits the parent has it appended. Carrying only
+   * `In-Reply-To` threads correctly in some clients and not others, which is why both
+   * headers are sent (§ providers/gmail/mime.ts).
+   */
+  inReplyTo?: {
+    providerThreadId: string;
+    internetMessageId: string;
+    references?: readonly string[];
+  };
 }
 
 export interface MailProvider {

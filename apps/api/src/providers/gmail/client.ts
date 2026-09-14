@@ -4,7 +4,9 @@ import { logger } from "../../lib/logger.js";
 import { mapWithConcurrency, withRetry } from "../../lib/retry.js";
 import { acquireGmailQuota, type GmailMethod } from "../../lib/rateLimiter.js";
 import { getAccessToken } from "../tokenManager.js";
+import { htmlToText } from "../../lib/html.js";
 import { mapThread } from "./map.js";
+import { buildMimeMessage, encodeMimeForGmail, type MimeMessageInput } from "./mime.js";
 import type {
   ListThreadIdsOptions,
   MailProvider,
@@ -78,6 +80,21 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
         ...(signal ? { signal } : {}),
       },
     );
+  }
+
+  /**
+   * The same plumbing without the retry, for requests that must not be repeated.
+   * Quota is still spent and the token is still fresh; what is missing is the one
+   * thing a send cannot have.
+   */
+  async function callOnce<T>(
+    method: GmailMethod,
+    fn: (gmail: gmail_v1.Gmail, requestOptions: { signal?: AbortSignal }) => Promise<T>,
+  ): Promise<T> {
+    const signal = context.signal;
+    await acquireGmailQuota(context.mailAccountId, method, signal);
+    const gmail = await api();
+    return fn(gmail, signal ? { signal } : {});
   }
 
   return {
@@ -211,18 +228,91 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
       return { changes: [...changes.values()], cursor: newCursor };
     },
 
-    async sendMessage(_input: OutboundMessage): Promise<never> {
-      // Phase 6. Rule 1 says sending is always a separate, user-initiated call, so
-      // this deliberately does not exist yet rather than being half-built.
-      throw new UpstreamError("Gmail sendMessage is not implemented until phase 6");
+    /**
+     * Sends one message (rule 1: only ever reached from a user-initiated request
+     * carrying text the user submitted).
+     *
+     * **This is the one call in the file that does not retry.** `withRetry` exists
+     * because a read that fails can be repeated for free; a send cannot. A 429 or a
+     * 502 from Gmail does not tell us whether the message went out — the failure may
+     * be on the response path — and a retry that guesses wrong sends the user's mail
+     * twice. So this spends its quota, makes exactly one attempt, and reports the
+     * failure to the caller, who can show it to the person who pressed the button.
+     */
+    async sendMessage(input: OutboundMessage) {
+      const raw = encodeMimeForGmail(buildMimeMessage(toMime(input, context.emailAddress)));
+
+      const response = await callOnce("users.messages.send", async (gmail, requestOptions) =>
+        gmail.users.messages.send(
+          {
+            userId: "me",
+            requestBody: {
+              raw,
+              /*
+               * Gmail's own grouping for this mailbox. It is *not* a substitute for
+               * In-Reply-To/References — those are what every other participant's
+               * client threads on — and Gmail rejects a threadId whose subject does
+               * not match, so the reply subject keeps the parent's.
+               */
+              ...(input.inReplyTo === undefined
+                ? {}
+                : { threadId: input.inReplyTo.providerThreadId }),
+            },
+          },
+          requestOptions,
+        ),
+      );
+
+      const providerMessageId = response.data.id;
+      const providerThreadId = response.data.threadId;
+
+      if (!providerMessageId || !providerThreadId) {
+        // The mail is gone whatever this says, so it is an upstream oddity rather
+        // than a failure to retry — and the log line is the only record of the ids.
+        throw new UpstreamError("Gmail accepted the send but returned no ids");
+      }
+
+      log.info({ providerMessageId, providerThreadId }, "message sent");
+      return { providerMessageId, providerThreadId };
     },
 
-    async createDraft(_input: OutboundMessage): Promise<never> {
-      throw new UpstreamError("Gmail createDraft is not implemented until phase 6");
+    /**
+     * Saves a draft in the user's mailbox.
+     *
+     * This one does retry: a duplicated draft is visible, editable and deletable,
+     * which a duplicated *send* is not.
+     */
+    async createDraft(input: OutboundMessage) {
+      const raw = encodeMimeForGmail(buildMimeMessage(toMime(input, context.emailAddress)));
+
+      const response = await call("users.drafts.create", async (gmail, requestOptions) =>
+        gmail.users.drafts.create(
+          {
+            userId: "me",
+            requestBody: {
+              message: {
+                raw,
+                ...(input.inReplyTo === undefined
+                  ? {}
+                  : { threadId: input.inReplyTo.providerThreadId }),
+              },
+            },
+          },
+          requestOptions,
+        ),
+      );
+
+      const draftId = response.data.id;
+      if (!draftId) throw new UpstreamError("Gmail created a draft with no id");
+
+      log.info({ draftId }, "draft created");
+      return { draftId };
     },
 
     async modifyLabels(): Promise<never> {
-      throw new UpstreamError("Gmail modifyLabels is not implemented until phase 6");
+      // Marking read, archiving and labelling are UI actions; nothing in phase 6
+      // needs them, and a half-built version would be a write path with no caller.
+      throw new UpstreamError("Gmail modifyLabels is not implemented yet");
     },
 
     async startWatch(): Promise<never> {
@@ -233,6 +323,63 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
       throw new UpstreamError("Gmail watch is not implemented until phase 7");
     },
   };
+}
+
+/**
+ * The port's outbound shape as MIME input.
+ *
+ * `from` is the mailbox's own address, taken from the provider context and never
+ * from the caller: Gmail would reject a foreign From anyway, and accepting one here
+ * would make "send as somebody else" an argument rather than an impossibility.
+ *
+ * The plain-text part is derived from the HTML when the caller did not supply one,
+ * because a text/html-only message is both a spam signal and unreadable in a client
+ * that prefers text.
+ */
+function toMime(input: OutboundMessage, mailboxAddress: string): MimeMessageInput {
+  return {
+    from: { email: mailboxAddress },
+    to: input.to,
+    ...(input.cc === undefined ? {} : { cc: input.cc }),
+    ...(input.bcc === undefined ? {} : { bcc: input.bcc }),
+    subject: input.subject,
+    html: input.bodyHtml,
+    text: input.bodyText ?? htmlToText(input.bodyHtml).trim(),
+    ...(input.inReplyTo === undefined
+      ? {}
+      : {
+          inReplyTo: input.inReplyTo.internetMessageId,
+          /*
+           * The chain is emitted as the caller built it, with the parent appended only
+           * if the caller did not already do so.
+           *
+           * Both layers used to append it, and a real self-addressed send showed the
+           * result: `References: <parent> <parent>`. Harmless to a client that
+           * deduplicates, wrong on the wire, and on a long thread it would fill half
+           * the (bounded) chain with duplicates of the ids that matter.
+           */
+          references: appendParent(
+            input.inReplyTo.references ?? [],
+            input.inReplyTo.internetMessageId,
+          ),
+        }),
+  };
+}
+
+/**
+ * The `References` chain to emit: the caller's, ending in the parent exactly once.
+ *
+ * Idempotent on purpose, because two callers disagree about whose job the last entry
+ * is: `services/send.ts` builds the full chain from the stored header, while a caller
+ * that only has the parent's Message-ID passes the chain without it.
+ */
+function appendParent(
+  references: readonly string[],
+  parentMessageId: string,
+): string[] {
+  return references.at(-1) === parentMessageId
+    ? [...references]
+    : [...references, parentMessageId];
 }
 
 /**

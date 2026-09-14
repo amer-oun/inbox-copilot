@@ -122,6 +122,16 @@ export const threadDetailSchema = z.object({
   needsReply: z.boolean(),
   language: languageSchema.nullable(),
   threatLevel: threatLevelSchema,
+  /**
+   * Who a reply would be addressed to, computed by the API from the newest message's
+   * headers — the same function the send path uses (`services/send.ts`). It is on the
+   * read contract so the composer can show the recipient before the user sends, rather
+   * than the UI guessing at it and being wrong about a Reply-To.
+   *
+   * Empty when there is nobody to reply to (a thread of the user's own mail to
+   * themselves), which is how the UI knows not to offer a composer.
+   */
+  replyRecipients: z.array(addressSchema),
   /** Null when the thread was below the summarization threshold (§5). */
   summary: threadSummarySchema.nullable(),
   /** Oldest first — the order a person reads a conversation in. */

@@ -1,0 +1,37 @@
+{
+  "id": "msg_01ReplyDraftsRecorded00001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01ReplyDrafts",
+      "name": "record_reply_drafts",
+      "input": {
+        "variants": [
+          {
+            "label": "Accept the PO figure",
+            "body": "Hi Dana,\n\nYou're right, the PO is the figure to go by. I'll get a revised invoice for 12 licences over to you today and the 30 days can run from that one.\n\nBest,\nSam"
+          },
+          {
+            "label": "Confirm the licence count first",
+            "body": "Hi Dana,\n\nBefore I reissue: we billed 14 because two seats were added on [date]. Can you check whether those were meant to sit outside NW-2291? If they were, I'll send a revised invoice for 12 and a separate one for the extras.\n\nBest,\nSam"
+          },
+          {
+            "label": "Hold the invoice and escalate internally",
+            "body": "Hi Dana,\n\nLet's put invoice 4471 on hold while I take this back to our side — I'd rather sort the licence count properly than reissue twice. I'll come back to you by [date].\n\nBest,\nSam"
+          }
+        ]
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 2140,
+    "output_tokens": 318,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

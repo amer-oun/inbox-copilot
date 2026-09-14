@@ -15,6 +15,7 @@ export const QUEUE_NAMES = {
   syncBackfill: "sync.backfill",
   aiEnrich: "ai.enrich",
   aiSweep: "ai.sweep",
+  aiStyle: "ai.style",
 } as const;
 
 /**
@@ -53,6 +54,20 @@ export const aiSweepJobSchema = z.object({
   perUserLimit: z.number().int().min(1).max(5_000).optional(),
 });
 export type AiSweepJob = z.infer<typeof aiSweepJobSchema>;
+
+/**
+ * Build (or refresh) one user's writing-style profile.
+ *
+ * Queued rather than done inline at the end of a backfill: it is a Sonnet call over
+ * thirty messages, and a sync that has just finished writing a mailbox should not
+ * also be waiting on the model before it reports success.
+ */
+export const aiStyleJobSchema = z.object({
+  userId: z.string().min(1),
+  /** Rebuild even when the stored profile is recent. */
+  force: z.boolean().optional(),
+});
+export type AiStyleJob = z.infer<typeof aiStyleJobSchema>;
 
 export const bullConnection: ConnectionOptions = {
   url: env.REDIS_URL,
@@ -114,6 +129,7 @@ export const AI_SWEEP_SCHEDULER_ID = "ai-sweep-every-30m";
 let backfillQueue: Queue<BackfillJob> | undefined;
 let enrichQueue: Queue<AiEnrichJob> | undefined;
 let sweepQueue: Queue<AiSweepJob> | undefined;
+let styleQueue: Queue<AiStyleJob> | undefined;
 
 /** Lazily constructed: importing this module must not open a connection. */
 export function syncBackfillQueue(): Queue<BackfillJob> {
@@ -182,9 +198,40 @@ export async function scheduleAiSweep(): Promise<void> {
   );
 }
 
+export function aiStyleQueue(): Queue<AiStyleJob> {
+  styleQueue ??= new Queue<AiStyleJob>(QUEUE_NAMES.aiStyle, {
+    connection: bullConnection,
+    defaultJobOptions: {
+      // Two attempts. A failed profile costs the user nothing immediate — their
+      // drafts are merely more generic until the next backfill or a manual refresh.
+      attempts: 2,
+      backoff: { type: "exponential", delay: 30_000 },
+      removeOnComplete: { age: 3_600, count: 50 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  return styleQueue;
+}
+
+/**
+ * One profile job per user. The id dedupes the case that actually happens: a user
+ * who connects two mailboxes gets two backfills, and both finish asking for the same
+ * profile over the same sent mail.
+ */
+export function aiStyleJobId(userId: string): string {
+  // No colon: BullMQ builds its own Redis keys with `:` as the separator.
+  return `style-${userId}`;
+}
+
 export async function closeQueues(): Promise<void> {
-  await Promise.all([backfillQueue?.close(), enrichQueue?.close(), sweepQueue?.close()]);
+  await Promise.all([
+    backfillQueue?.close(),
+    enrichQueue?.close(),
+    sweepQueue?.close(),
+    styleQueue?.close(),
+  ]);
   backfillQueue = undefined;
   enrichQueue = undefined;
   sweepQueue = undefined;
+  styleQueue = undefined;
 }

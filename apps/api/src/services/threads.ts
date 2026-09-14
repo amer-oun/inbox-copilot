@@ -10,6 +10,7 @@ import {
 } from "@inbox-copilot/shared";
 import { BadRequestError, NotFoundError } from "../lib/errors.js";
 import { sanitizeEmailHtml } from "./security/sanitize.js";
+import { replyRecipients, type ReplyTarget } from "./send.js";
 
 /**
  * Inbox reads (ARCHITECTURE §1). Every query goes through `dbForUser`, so the
@@ -236,6 +237,7 @@ export async function getThread(input: {
       needsReply: true,
       language: true,
       threatLevel: true,
+      mailAccount: { select: { emailAddress: true } },
       messages: {
         orderBy: { sentAt: "asc" },
         select: {
@@ -244,6 +246,7 @@ export async function getThread(input: {
           fromEmail: true,
           to: true,
           cc: true,
+          replyTo: true,
           subject: true,
           sentAt: true,
           isRead: true,
@@ -300,6 +303,7 @@ export async function getThread(input: {
   const summary = row.summaries[0];
 
   return threadDetailSchema.parse({
+    replyRecipients: replyTargetsFor(row.messages, row.mailAccount.emailAddress),
     id: row.id,
     subject: row.subject,
     participants: parseParticipants(row.participants),
@@ -326,6 +330,30 @@ export async function getThread(input: {
       : null,
     messages,
   });
+}
+
+/**
+ * Who a reply to this thread would go to.
+ *
+ * Delegated to the send path's own function so the address shown in the composer is
+ * the address that will actually be used. A thread with nobody to answer is an empty
+ * list rather than an error: the user came here to read it.
+ */
+function replyTargetsFor(
+  messages: readonly ReplyTarget[],
+  mailboxAddress: string,
+): AddressDto[] {
+  const newest = messages.at(-1);
+  if (newest === undefined) return [];
+
+  try {
+    return replyRecipients(newest, mailboxAddress).map((address) => ({
+      name: address.name ?? null,
+      email: address.email,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 /**

@@ -152,20 +152,83 @@ browser already holds its own session cookie and the JWT lives 60 seconds, so th
 practical gain to an attacker is nil, but do not screen-share or record dev
 `view-source` output, and do not mistake it for a production leak.
 
+## Replies, composing and sending
+
+Three operations, deliberately unable to reach each other:
+
+```
+POST /threads/:id/replies   → 3 ReplyDraft rows. Sends nothing.
+POST /threads/:id/reply     → sends the body in the request. Calls no model.
+POST /compose               → subject + body as text. Sends nothing.
+```
+
+There is no endpoint that sends a stored draft by id, and no flag that sends a
+generated one — so the only path from model output to a mailbox runs through a person
+reading it in the composer and posting it back (rule 1). The reply tool's schema has
+two fields per draft, `label` and `body`: a model that decides to mail a third party
+has nowhere to put the address. Recipients are computed in `services/send.ts` from the
+parent message's headers, and the thread read returns that same computation as
+`replyRecipients` so the composer shows the address the send will actually use.
+
+`sendMessage` is the one Gmail call that does **not** retry (`callOnce` in
+`providers/gmail/client.ts`). A 429 or a 502 does not say whether the message went
+out, and a retry that guesses wrong sends the user's mail twice. `createDraft` does
+retry — a duplicated draft is deletable.
+
+Threading is `In-Reply-To` + `References` from the parent's `internetMessageId` and
+its stored `references` header, plus Gmail's own `threadId`. `services/send.ts` owns
+the chain and ends it with the parent; the provider appends the parent only if the
+caller did not (`appendParent`). Both layers appending is how a real send produced
+`References: <parent> <parent>`. The threadId alone groups
+the reply in *this* mailbox only; every other participant's client threads on the
+headers. MIME is built in `providers/gmail/mime.ts` — the one place that writes
+headers, so header-injection checks live there once. Long values are folded, and the
+fold-aware check is why `assertFoldedHeaderSafe` exists.
+
+The sent message is **not** written to `Message`. The sync engine owns that table and
+the next delta brings the real row with the provider's ids; a row fabricated at send
+time would be a second source of truth about what was sent.
+
+## Writing style profile
+
+`services/ai/style.ts` samples ~30 of the user's own sent messages and writes
+`UserWritingStyle`, which is injected into every reply and compose prompt. §5 calls it
+the main quality lever, and the difference is visible: without it a draft is competent
+and anonymous.
+
+Split by what each half is good at — sentence length and emoji use are *counted* from
+the samples, while greeting, sign-off, register and the free-form descriptor are the
+model's judgment. Quoted text is stripped before sampling (`stripQuotedText`), for
+quality (a quoted original is somebody else's voice) and for safety: a reply quotes the
+message it answers, so that is how an attacker's text would otherwise reach the prompt
+that shapes every future draft. The descriptor is defanged like mail content when
+injected, because it is derived from text we did not write.
+
+It runs on the `ai.style` queue when a backfill finishes, and on demand:
+
+```bash
+curl -X POST .../writing-style?force=true   # rebuild now, ignoring the 30-day age check
+```
+
+Fewer than three usable samples writes **nothing** — not even an empty row. The reply
+prompt asks whether a profile exists, and an empty one would be followed as a
+description of a writer nobody has read.
+
 ## Current phase
-> Phase 5 — Inbox UI: DONE. `GET /threads?category=&cursor=&limit=` and
-> `GET /threads/:id` in `apps/api` (`routes/threads.ts`, `services/threads.ts`),
-> tenant-filtered, read-only. The list sorts by `priorityScore DESC NULLS LAST`,
-> then `lastMessageAt`, then `id`, and pages with a keyset cursor over that triple
-> — offset would drop or repeat rows, because the enrichment worker is still
-> rewriting the scores the list is sorted by.
-> `apps/web`: `/inbox/[category]` (tabs from the Category enum) and `/thread/[id]`,
-> Server Components throughout except the infinite list and the message bodies.
-> TanStack Query loads later pages through the BFF proxy at
-> `/api/proxy/[...path]`, which is GET-only and path-allowlisted.
-> Email HTML rendering is described under "Rendering email HTML" above — read that
-> before touching it.
-> Next: Phase 6 — replies. Smart reply variants, tone selector, writing-style
-> profile, send via the provider (and rule 1 still holds: drafts only, sending is a
-> separate user-initiated call).
+> Phase 6 — Replies: DONE. `services/ai/style.ts` (writing-style profile, `ai.style`
+> queue, built after backfill and on demand), `services/ai/reply.ts` (three drafts per
+> thread per tone, persisted to `ReplyDraft`), `services/ai/compose.ts` (new message
+> from an intent, a recipient and prior correspondence with them),
+> `providers/gmail/mime.ts` + `sendMessage`/`createDraft` in `GmailProvider`, and
+> `services/send.ts` — the only code in the application that puts mail on the wire.
+> Routes in `routes/reply.ts`; UI in `components/thread/ReplyComposer.tsx`, reached
+> through the BFF proxy, which is now GET+POST with a separate allowlist per method and
+> an Origin check on writes.
+> Read "Replies, composing and sending" and "Writing style profile" above before
+> touching any of it.
+> Verified against real Gmail once, self-addressed (a `+tag` alias of the mailbox, so
+> the reply ran through `replyRecipients` for real): parent and reply landed in one
+> conversation with `In-Reply-To` and `References` pointing at the parent.
+> Next: Phase 7 — push notifications (Gmail watch / Graph subscriptions) so the
+> mailbox updates without polling.
 > Update this line as we progress.

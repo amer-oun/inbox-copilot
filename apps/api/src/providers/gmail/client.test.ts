@@ -15,6 +15,8 @@ const historyListFn = vi.hoisted(() => vi.fn());
 const getProfileFn = vi.hoisted(() => vi.fn());
 const attachmentsGet = vi.hoisted(() => vi.fn());
 const setCredentials = vi.hoisted(() => vi.fn());
+const messagesSend = vi.hoisted(() => vi.fn());
+const draftsCreate = vi.hoisted(() => vi.fn());
 
 vi.mock("../tokenManager.js", () => ({ getAccessToken }));
 
@@ -36,7 +38,8 @@ vi.mock("googleapis", () => ({
         getProfile: getProfileFn,
         threads: { list: threadsList, get: threadsGet },
         history: { list: historyListFn },
-        messages: { attachments: { get: attachmentsGet } },
+        messages: { attachments: { get: attachmentsGet }, send: messagesSend },
+        drafts: { create: draftsCreate },
       },
     }),
   },
@@ -59,6 +62,8 @@ describe("GmailProvider", () => {
     getProfileFn.mockReset();
     attachmentsGet.mockReset();
     setCredentials.mockReset();
+    messagesSend.mockReset();
+    draftsCreate.mockReset();
     acquireGmailQuota.mockReset().mockResolvedValue(undefined);
   });
 
@@ -359,17 +364,194 @@ describe("GmailProvider", () => {
     });
   });
 
-  describe("methods belonging to later phases", () => {
-    it("refuses to send, draft, modify labels or watch", async () => {
-      const provider = createGmailProvider(CONTEXT);
+  describe("sending", () => {
+    /** The raw message Gmail was handed, decoded back into text. */
+    function sentMime(): string {
+      const raw = messagesSend.mock.calls[0]?.[0]?.requestBody?.raw as string;
+      return Buffer.from(raw, "base64url").toString("utf8");
+    }
+
+    beforeEach(() => {
+      messagesSend.mockResolvedValue({ data: { id: "m_99", threadId: "t_1" } });
+    });
+
+    it("sends a base64url-encoded message and returns the provider ids", async () => {
+      const result = await createGmailProvider(CONTEXT).sendMessage({
+        to: [{ name: "Ada", email: "ada@example.test" }],
+        subject: "Re: invoice",
+        bodyHtml: "<p>Paid.</p>",
+        bodyText: "Paid.",
+      });
+
+      expect(result).toEqual({ providerMessageId: "m_99", providerThreadId: "t_1" });
+
+      const mime = sentMime();
+      expect(mime).toContain('To: "Ada" <ada@example.test>');
+      // The From is the mailbox, from the context — never an argument.
+      expect(mime).toContain("From: person@example.com");
+      expect(mime).toContain("Subject: Re: invoice");
+      expect(mime).toContain("Content-Type: multipart/alternative");
+    });
+
+    it("threads a reply on In-Reply-To, References and Gmail's threadId", async () => {
+      await createGmailProvider(CONTEXT).sendMessage({
+        to: [{ email: "ada@example.test" }],
+        subject: "Re: invoice",
+        bodyHtml: "<p>ok</p>",
+        inReplyTo: {
+          providerThreadId: "t_1",
+          internetMessageId: "<parent@mail.example>",
+          references: ["<first@mail.example>"],
+        },
+      });
+
+      const mime = sentMime();
+      expect(mime).toContain("In-Reply-To: <parent@mail.example>");
+      // The chain, parent appended: other clients thread on this, not on threadId.
+      expect(mime).toContain("References: <first@mail.example> <parent@mail.example>");
+      expect(messagesSend.mock.calls[0]?.[0]?.requestBody?.threadId).toBe("t_1");
+    });
+
+    it("does not repeat the parent when the caller's chain already ends with it", async () => {
+      /*
+       * `services/send.ts` builds the whole chain, parent included. Appending it again
+       * here produced `References: <parent> <parent>` — found by sending a real
+       * self-addressed pair and reading the headers Gmail stored.
+       */
+      await createGmailProvider(CONTEXT).sendMessage({
+        to: [{ email: "ada@example.test" }],
+        subject: "Re: invoice",
+        bodyHtml: "<p>ok</p>",
+        inReplyTo: {
+          providerThreadId: "t_1",
+          internetMessageId: "<parent@mail.example>",
+          references: ["<first@mail.example>", "<parent@mail.example>"],
+        },
+      });
+
+      const references = /References: (.*)/.exec(sentMime())?.[1] ?? "";
+      expect(references).toBe("<first@mail.example> <parent@mail.example>");
+      expect(references.match(/<parent@mail.example>/g)).toHaveLength(1);
+    });
+
+    it("sends no threadId for a message that is not a reply", async () => {
+      await createGmailProvider(CONTEXT).sendMessage({
+        to: [{ email: "ada@example.test" }],
+        subject: "New",
+        bodyHtml: "<p>hi</p>",
+      });
+
+      expect(messagesSend.mock.calls[0]?.[0]?.requestBody).not.toHaveProperty("threadId");
+      expect(sentMime()).not.toContain("In-Reply-To");
+    });
+
+    it("derives a plain-text part when the caller supplies only HTML", async () => {
+      await createGmailProvider(CONTEXT).sendMessage({
+        to: [{ email: "ada@example.test" }],
+        subject: "New",
+        bodyHtml: "<p>Hello there</p>",
+      });
+
+      const mime = sentMime();
+      const parts = mime.split(/--=_inbox_copilot_[0-9a-f]+/);
+      const textPart = parts.find((part) => part.includes("text/plain")) ?? "";
+      const body = Buffer.from(
+        textPart.split("\r\n\r\n")[1]?.trim() ?? "",
+        "base64",
+      ).toString("utf8");
+      expect(body).toContain("Hello there");
+    });
+
+    it("spends the documented send quota", async () => {
+      await createGmailProvider(CONTEXT).sendMessage({
+        to: [{ email: "ada@example.test" }],
+        subject: "x",
+        bodyHtml: "<p>y</p>",
+      });
+
+      expect(acquireGmailQuota).toHaveBeenCalledWith(
+        "mail_1",
+        "users.messages.send",
+        undefined,
+      );
+    });
+
+    it("makes exactly one attempt, even on an error that would normally retry", async () => {
+      /*
+       * The point of the whole `callOnce` path. A 429 is retryable for every read in
+       * this file; for a send it is not, because the failure may be on the response
+       * path and the message may already be out. One attempt, then tell the caller.
+       */
+      messagesSend.mockReset().mockRejectedValue(
+        Object.assign(new Error("rate limit"), { response: { status: 429 } }),
+      );
 
       await expect(
-        provider.sendMessage({ to: [{ email: "a@b.test" }], subject: "x", bodyHtml: "y" }),
-      ).rejects.toThrow(/phase 6/);
+        createGmailProvider(CONTEXT).sendMessage({
+          to: [{ email: "ada@example.test" }],
+          subject: "x",
+          bodyHtml: "<p>y</p>",
+        }),
+      ).rejects.toThrow(/rate limit/);
+
+      expect(messagesSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a recipient carrying header syntax", async () => {
       await expect(
-        provider.createDraft({ to: [{ email: "a@b.test" }], subject: "x", bodyHtml: "y" }),
-      ).rejects.toThrow(/phase 6/);
-      await expect(provider.modifyLabels("t", [], [])).rejects.toThrow(/phase 6/);
+        createGmailProvider(CONTEXT).sendMessage({
+          to: [{ email: "ada@example.test>, victim@evil.test" }],
+          subject: "x",
+          bodyHtml: "<p>y</p>",
+        }),
+      ).rejects.toThrow(/Invalid email address/);
+
+      expect(messagesSend).not.toHaveBeenCalled();
+    });
+
+    it("treats a send with no returned ids as an upstream fault", async () => {
+      messagesSend.mockReset().mockResolvedValue({ data: {} });
+
+      await expect(
+        createGmailProvider(CONTEXT).sendMessage({
+          to: [{ email: "ada@example.test" }],
+          subject: "x",
+          bodyHtml: "<p>y</p>",
+        }),
+      ).rejects.toThrow(/returned no ids/);
+    });
+  });
+
+  describe("drafts", () => {
+    it("creates a draft with the same MIME and returns its id", async () => {
+      draftsCreate.mockResolvedValue({ data: { id: "d_1" } });
+
+      const result = await createGmailProvider(CONTEXT).createDraft({
+        to: [{ email: "ada@example.test" }],
+        subject: "Draft",
+        bodyHtml: "<p>later</p>",
+        inReplyTo: { providerThreadId: "t_2", internetMessageId: "<p@m.example>" },
+      });
+
+      expect(result).toEqual({ draftId: "d_1" });
+      const message = draftsCreate.mock.calls[0]?.[0]?.requestBody?.message;
+      expect(message?.threadId).toBe("t_2");
+      expect(Buffer.from(message?.raw as string, "base64url").toString("utf8")).toContain(
+        "In-Reply-To: <p@m.example>",
+      );
+      expect(acquireGmailQuota).toHaveBeenCalledWith(
+        "mail_1",
+        "users.drafts.create",
+        undefined,
+      );
+    });
+  });
+
+  describe("methods belonging to later phases", () => {
+    it("refuses to modify labels or watch", async () => {
+      const provider = createGmailProvider(CONTEXT);
+
+      await expect(provider.modifyLabels("t", [], [])).rejects.toThrow(/not implemented/);
       await expect(provider.startWatch()).rejects.toThrow(/phase 7/);
       await expect(provider.stopWatch()).rejects.toThrow(/phase 7/);
     });

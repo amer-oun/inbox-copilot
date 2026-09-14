@@ -23,6 +23,11 @@ export type ModelId = (typeof MODELS)[ModelTier];
 export const FEATURE_MODELS = {
   classify: MODELS.fast,
   summarize: MODELS.standard,
+  reply: MODELS.standard,
+  compose: MODELS.standard,
+  // Style profiling runs once per mailbox, over ~30 messages, and its output is
+  // injected into every reply the user ever sees — the one call worth not saving on.
+  style: MODELS.standard,
 } as const satisfies Record<string, ModelId>;
 
 export type AiFeature = keyof typeof FEATURE_MODELS;
@@ -38,6 +43,11 @@ export type AiFeature = keyof typeof FEATURE_MODELS;
 export const MAX_OUTPUT_TOKENS = {
   classify: 512,
   summarize: 2_048,
+  // Three drafts, so three times the room of one — and a ceiling low enough that a
+  // model writing an essay is cut off rather than billed for.
+  reply: 3_072,
+  compose: 1_536,
+  style: 1_024,
 } as const satisfies Record<AiFeature, number>;
 
 /**

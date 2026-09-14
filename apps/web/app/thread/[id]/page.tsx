@@ -7,6 +7,7 @@ import { requireSession } from "../../../lib/session";
 import { Badge } from "../../../components/ui/badge";
 import { SummaryCard } from "../../../components/thread/SummaryCard";
 import { MessageCard } from "../../../components/thread/MessageCard";
+import { ReplyComposer } from "../../../components/thread/ReplyComposer";
 
 /**
  * One thread: summary first, then the conversation oldest-first.
@@ -106,6 +107,15 @@ export default async function ThreadPage({ params }: ThreadPageProps) {
         {thread.messages.map((message) => (
           <MessageCard key={message.id} message={message} />
         ))}
+      </div>
+
+      {/*
+        The composer goes last, where a reply belongs in a conversation. The recipient
+        is handed down from the API rather than derived here: the address on the send
+        button must be the address the send path will actually use.
+      */}
+      <div className="mt-5">
+        <ReplyComposer threadId={thread.id} recipients={thread.replyRecipients} />
       </div>
     </main>
   );

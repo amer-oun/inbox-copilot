@@ -7,7 +7,7 @@ import { isAbortError } from "../../lib/retry.js";
 import { classifyMessage } from "./classify.js";
 import { summarizeThread } from "./summarize.js";
 import { loadAiSettings } from "./usage.js";
-import type { MessageForPrompt } from "./content.js";
+import { MESSAGE_PROMPT_SELECT, type MessageForPrompt } from "./content.js";
 
 /**
  * The `ai.enrich` pipeline (§5): classify a new message, summarize its thread when
@@ -19,23 +19,6 @@ import type { MessageForPrompt } from "./content.js";
  * enforced at the granularity it is expressed in — calls.
  */
 
-/** Columns needed to build a prompt. Bodies are read here and never logged. */
-const MESSAGE_PROMPT_SELECT = {
-  id: true,
-  subject: true,
-  fromName: true,
-  fromEmail: true,
-  to: true,
-  cc: true,
-  replyTo: true,
-  sentAt: true,
-  bodyText: true,
-  bodyHtml: true,
-  snippet: true,
-  isOutbound: true,
-  hasAttachments: true,
-  contentHash: true,
-} as const;
 
 export interface EnrichInput {
   userId: string;

@@ -87,6 +87,7 @@ const DETAIL = {
   needsReply: true,
   language: "en",
   threatLevel: "UNKNOWN" as const,
+  replyRecipients: [{ name: "Dana", email: "dana@northwind.example" }],
   summary: null,
   messages: [
     {

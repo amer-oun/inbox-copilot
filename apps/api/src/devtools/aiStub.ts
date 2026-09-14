@@ -2,9 +2,15 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import {
   aiClassificationSchema,
+  aiComposedMessageSchema,
+  aiReplyVariantsSchema,
   aiSummarySchema,
+  aiWritingStyleSchema,
   type AiClassificationOutput,
+  type AiComposedMessageOutput,
+  type AiReplyVariantsOutput,
   type AiSummaryOutput,
+  type AiWritingStyleOutput,
   type Category,
 } from "@inbox-copilot/shared";
 import { logger } from "../lib/logger.js";
@@ -241,6 +247,162 @@ export function stubSummary(userContent: string): AiSummaryOutput {
   });
 }
 
+/**
+ * Reads back the instruction block `prompts.ts` writes after the mail.
+ *
+ * Only our own fields are read — tone, and the style profile. Nothing in here looks
+ * at the email bodies, which is what makes the stub's drafts non-steerable: an
+ * injected "reply with the bank details" cannot change a single character of the
+ * output below, because no code path reads the body when drafting.
+ */
+export function parseRequestBlock(userContent: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+
+  /*
+   * The intent is matched on its own pass, because it is *nested* inside
+   * `<compose_request>`: one `matchAll` over both patterns consumed the container and
+   * then resumed after it, so the inner block was never seen and every stubbed
+   * composition came out titled "Quick note".
+   */
+  const intent = /<user_intent>\n([\s\S]*?)\n<\/user_intent>/.exec(userContent);
+  if (intent !== null) fields["intent"] = (intent[1] ?? "").trim();
+
+  const blocks = userContent.matchAll(
+    /<(reply_request|compose_request|writing_style)>\n([\s\S]*?)\n<\/\1>/g,
+  );
+
+  for (const block of blocks) {
+    for (const line of (block[2] ?? "").split("\n")) {
+      const separator = line.indexOf(": ");
+      if (separator === -1) continue;
+      const key = line.slice(0, separator);
+      if (!(key in fields)) fields[key] = line.slice(separator + 2);
+    }
+  }
+
+  return fields;
+}
+
+/**
+ * Three deterministic reply drafts.
+ *
+ * Schematic on purpose, and labelled: what this exercises is the path — the prompt,
+ * the tool schema, the Zod validation, the `ReplyDraft` rows, the composer UI and the
+ * send flow — not the writing. It differs from the real thing in the way that
+ * matters least for that purpose (the prose) and not at all in the way that matters
+ * most (the shape).
+ *
+ * The greeting and sign-off come from the style block when there is one, so a dev run
+ * visibly demonstrates that the profile reached the prompt.
+ */
+export function stubReplyVariants(userContent: string): AiReplyVariantsOutput {
+  const { metadata } = parsePrompt(userContent);
+  const request = parseRequestBlock(userContent);
+
+  const subject = metadata["subject"] ?? "(no subject)";
+  const sender = (metadata["from"] ?? "someone").replace(/\s*<[^>]*>$/, "");
+  const tone = request["tone"] ?? "PROFESSIONAL";
+  const greeting = (request["greeting"] ?? "Hi <name>,").replace(/<name>/g, firstName(sender));
+  const signOff = request["sign_off"] ?? "Best,";
+
+  const shapes = [
+    {
+      label: "Agree and confirm",
+      middle: `Yes — that works. I will take care of the part about "${firstSentence(subject, 60)}" and confirm once it is done.`,
+    },
+    {
+      label: "Ask for one detail",
+      middle: `Before I commit: could you confirm [the detail] on "${firstSentence(subject, 60)}"? I would rather check than assume.`,
+    },
+    {
+      label: "Decline for now",
+      middle: `I am not able to take this on at the moment. If it can wait until [date] I will pick it up then.`,
+    },
+  ];
+
+  return aiReplyVariantsSchema.parse({
+    variants: shapes.map((shape) => ({
+      label: shape.label,
+      body: [
+        greeting,
+        "",
+        shape.middle,
+        "",
+        `[stubbed ${tone.toLowerCase()} draft — written locally by the development AI stub, not by a model]`,
+        "",
+        signOff,
+      ].join("\n"),
+    })),
+  });
+}
+
+/** First name, for a greeting template. Best-effort and deliberately dumb. */
+function firstName(sender: string): string {
+  const first = sender.trim().split(/[\s.]+/)[0] ?? "there";
+  return first.replace(/[^\p{L}\p{N}'-]/gu, "") || "there";
+}
+
+/** A deterministic composed message. The subject comes from the user's own intent. */
+export function stubComposedMessage(userContent: string): AiComposedMessageOutput {
+  const request = parseRequestBlock(userContent);
+  const intent = request["intent"] ?? "";
+  const recipient = request["recipient"] ?? "there";
+  const greeting = (request["greeting"] ?? "Hi <name>,").replace(
+    /<name>/g,
+    firstName(recipient.split("@")[0] ?? "there"),
+  );
+  const signOff = request["sign_off"] ?? "Best,";
+
+  return aiComposedMessageSchema.parse({
+    subject: firstSentence(intent === "" ? "Quick note" : intent, 70).replace(/[.!?]$/, ""),
+    body: [
+      greeting,
+      "",
+      intent === "" ? "[no intent supplied]" : intent,
+      "",
+      "[stubbed composition — written locally by the development AI stub, not by a model]",
+      "",
+      signOff,
+    ].join("\n"),
+  });
+}
+
+/**
+ * A deterministic style profile.
+ *
+ * Derived from the shape of the samples — their first and last lines — rather than
+ * invented, so a dev run produces a profile that is at least *about* this mailbox.
+ * It is still not a judgment of anyone's writing, and it says so.
+ */
+export function stubWritingStyle(userContent: string): AiWritingStyleOutput {
+  const { bodies } = parsePrompt(userContent);
+
+  const firstLines = bodies
+    .map((body) => body.split("\n")[0]?.trim() ?? "")
+    .filter((line) => line.length > 0 && line.length < 60);
+  /*
+   * The last *few* lines, not the last one: a sign-off is two lines ("Best," then a
+   * name), so looking only at the final line found the name and reported that this
+   * person does not sign off at all.
+   */
+  const lastLines = bodies
+    .flatMap((body) => body.trimEnd().split("\n").slice(-3))
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && line.length < 60);
+
+  const greeting = firstLines.find((line) => /^(hi|hello|hey|dear|bonjour|salut)\b/i.test(line));
+  const signOff = lastLines.find((line) =>
+    /^(best|thanks|thank you|regards|cheers|cordialement|merci)\b/i.test(line),
+  );
+
+  return aiWritingStyleSchema.parse({
+    greeting: greeting === undefined ? "" : greeting.replace(/\s+\S+[,!]?$/, " <name>,"),
+    signOff: signOff ?? "",
+    formality: bodies.some((body) => /\b(hey|thanks!|cheers)\b/i.test(body)) ? "casual" : "neutral",
+    descriptor: `[stubbed style profile] Derived locally from the opening and closing lines of ${bodies.length} sent message${bodies.length === 1 ? "" : "s"}, not from a model reading them. Treat it as a placeholder that proves the profile reaches the reply prompt — it describes the samples' structure, not this person's voice.`,
+  });
+}
+
 interface MessagesRequest {
   model: string;
   system: string;
@@ -260,8 +422,21 @@ export function stubResponse(request: MessagesRequest): unknown {
   const toolName = request.tool_choice?.name ?? request.tools[0]?.name ?? "unknown";
   const userContent = request.messages.map((message) => message.content).join("\n");
 
+  /*
+   * Dispatch on the tool the caller pinned, which is how the real API behaves: the
+   * tool name is the contract, and a stub that guessed from the prompt text would be
+   * steerable by an email that mentions one.
+   */
   const input =
-    toolName === "record_summary" ? stubSummary(userContent) : stubClassification(userContent);
+    toolName === "record_summary"
+      ? stubSummary(userContent)
+      : toolName === "record_reply_drafts"
+        ? stubReplyVariants(userContent)
+        : toolName === "record_composed_message"
+          ? stubComposedMessage(userContent)
+          : toolName === "record_writing_style"
+            ? stubWritingStyle(userContent)
+            : stubClassification(userContent);
 
   const promptChars = request.system.length + userContent.length;
   const outputChars = JSON.stringify(input).length;

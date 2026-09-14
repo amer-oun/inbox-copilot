@@ -1,4 +1,5 @@
 import { dbForUser } from "@inbox-copilot/db";
+import type { ReplyTone } from "@inbox-copilot/shared";
 import { logger } from "../../lib/logger.js";
 import { costUsd, type TokenCounts } from "./models.js";
 
@@ -17,6 +18,7 @@ export const DEFAULT_SETTINGS = {
   autoSummarize: true,
   autoCategorize: true,
   dailyAiCallCap: 500,
+  defaultTone: "PROFESSIONAL",
 } as const;
 
 export interface AiSettings {
@@ -24,6 +26,8 @@ export interface AiSettings {
   autoSummarize: boolean;
   autoCategorize: boolean;
   dailyAiCallCap: number;
+  /** The tone a reply is drafted in when the caller does not name one. */
+  defaultTone: ReplyTone;
 }
 
 export async function loadAiSettings(userId: string): Promise<AiSettings> {
@@ -34,6 +38,7 @@ export async function loadAiSettings(userId: string): Promise<AiSettings> {
       autoSummarize: true,
       autoCategorize: true,
       dailyAiCallCap: true,
+      defaultTone: true,
     },
   });
 

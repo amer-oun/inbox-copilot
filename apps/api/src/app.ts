@@ -4,6 +4,7 @@ import { logger, redactUrl } from "./lib/logger.js";
 import { healthRouter } from "./routes/health.js";
 import { mailAccountsRouter } from "./routes/mailAccounts.js";
 import { oauthRouter } from "./routes/oauth.js";
+import { replyRouter } from "./routes/reply.js";
 import { threadsRouter } from "./routes/threads.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 
@@ -38,6 +39,7 @@ export function createApp(): Express {
   app.use(oauthRouter);
   app.use(mailAccountsRouter);
   app.use(threadsRouter);
+  app.use(replyRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

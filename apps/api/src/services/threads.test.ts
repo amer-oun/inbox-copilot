@@ -313,6 +313,7 @@ describe("getThread", () => {
       needsReply: true,
       language: "en",
       threatLevel: "UNKNOWN",
+      mailAccount: { emailAddress: "me@example.com" },
       messages: [
         {
           id: "cm00000000000000000000010",
@@ -320,6 +321,7 @@ describe("getThread", () => {
           fromEmail: "dana@northwind.example",
           to: ["me@example.com"],
           cc: [],
+          replyTo: null,
           subject: "Invoice 4471",
           sentAt: new Date("2026-09-10T09:00:00Z"),
           isRead: true,
@@ -388,6 +390,52 @@ describe("getThread", () => {
     expect(thread.messages[0]?.bodyHtmlSanitized).toBeNull();
     expect(thread.messages[0]?.bodyText).toContain("revised invoice");
     expect(thread.messages[0]?.blockedRemoteImages).toBe(0);
+  });
+
+  it("tells the UI who a reply would go to", async () => {
+    threadFindFirst.mockResolvedValue(detailRow());
+    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+
+    expect(thread.replyRecipients).toEqual([
+      { name: "Dana Whitfield", email: "dana@northwind.example" },
+    ]);
+  });
+
+  it("honours Reply-To, so the composer shows the address the send will use", async () => {
+    const base = detailRow();
+    threadFindFirst.mockResolvedValue({
+      ...base,
+      messages: [{ ...base.messages[0], replyTo: "Billing <billing@northwind.example>" }],
+    });
+
+    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+
+    // Computed by the send path's own function, so the address on the button cannot
+    // disagree with the address the reply is actually addressed to.
+    expect(thread.replyRecipients).toEqual([
+      { name: "Billing", email: "billing@northwind.example" },
+    ]);
+  });
+
+  it("reports nobody to reply to rather than failing the read", async () => {
+    // A thread of the user's own mail to themselves. The composer hides itself; the
+    // thread still opens, because the user came here to read it.
+    const base = detailRow();
+    threadFindFirst.mockResolvedValue({
+      ...base,
+      messages: [
+        {
+          ...base.messages[0],
+          isOutbound: true,
+          fromName: null,
+          fromEmail: "me@example.com",
+          to: ["me@example.com"],
+        },
+      ],
+    });
+
+    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    expect(thread.replyRecipients).toEqual([]);
   });
 
   it("returns null summary for a thread below the threshold", async () => {
