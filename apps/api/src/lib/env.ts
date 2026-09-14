@@ -76,6 +76,35 @@ const envSchema = z.object({
   /** Port for the development AI stub (`pnpm ai:stub`). */
   AI_STUB_PORT: z.coerce.number().int().min(1).max(65535).default(4010),
 
+  /**
+   * Pub/Sub topic that Gmail publishes mailbox changes to, as
+   * `projects/<project>/topics/<topic>` (§4). Empty means push is not configured:
+   * `startWatch` refuses with a clear error and the mailbox keeps working through
+   * backfill and the catch-up sweep, just without real-time updates.
+   */
+  GMAIL_PUBSUB_TOPIC: z.string().default(""),
+
+  /**
+   * The `aud` claim to require on the push subscription's OIDC token. Whatever was
+   * configured on the subscription — conventionally the push endpoint URL. Empty
+   * means "the webhook's own URL", derived from API_PUBLIC_URL.
+   */
+  GMAIL_PUBSUB_AUDIENCE: z.string().default(""),
+
+  /**
+   * The service account Pub/Sub signs push tokens as. Empty accepts any Google-signed
+   * token for the audience, which is weaker: anyone with a Google service account
+   * could then mint one for a URL they know. Set it.
+   */
+  GMAIL_PUBSUB_SERVICE_ACCOUNT: z.union([z.literal(""), z.email()]).default(""),
+
+  /**
+   * Development-only shared secret for the webhook, so the push path can be driven
+   * locally without a public URL. Ignored outside development — see
+   * `lib/pubsub.ts`, which refuses it in production even if it is set.
+   */
+  GMAIL_WEBHOOK_DEV_TOKEN: z.string().default(""),
+
   MICROSOFT_CLIENT_ID: z.string().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().default(""),
   /** "common" for multi-tenant + personal accounts; a GUID to lock to one tenant. */

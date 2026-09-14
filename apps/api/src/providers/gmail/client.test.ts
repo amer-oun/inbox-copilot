@@ -17,6 +17,8 @@ const attachmentsGet = vi.hoisted(() => vi.fn());
 const setCredentials = vi.hoisted(() => vi.fn());
 const messagesSend = vi.hoisted(() => vi.fn());
 const draftsCreate = vi.hoisted(() => vi.fn());
+const usersWatch = vi.hoisted(() => vi.fn());
+const usersStop = vi.hoisted(() => vi.fn());
 
 vi.mock("../tokenManager.js", () => ({ getAccessToken }));
 
@@ -40,12 +42,17 @@ vi.mock("googleapis", () => ({
         history: { list: historyListFn },
         messages: { attachments: { get: attachmentsGet }, send: messagesSend },
         drafts: { create: draftsCreate },
+        watch: usersWatch,
+        stop: usersStop,
       },
     }),
   },
 }));
 
+const TOPIC = "projects/inbox-copilot-test/topics/gmail-push";
+
 const { createGmailProvider } = await import("./client.js");
+const { env } = await import("../../lib/env.js");
 
 const CONTEXT = {
   mailAccountId: "mail_1",
@@ -62,6 +69,11 @@ describe("GmailProvider", () => {
     getProfileFn.mockReset();
     attachmentsGet.mockReset();
     setCredentials.mockReset();
+    usersWatch.mockReset();
+    usersStop.mockReset();
+    // Mutated rather than mocked: `env` is validated once at import, and the code under
+    // test reads the topic at call time precisely so it can change.
+    env.GMAIL_PUBSUB_TOPIC = TOPIC;
     messagesSend.mockReset();
     draftsCreate.mockReset();
     acquireGmailQuota.mockReset().mockResolvedValue(undefined);
@@ -547,13 +559,111 @@ describe("GmailProvider", () => {
     });
   });
 
-  describe("methods belonging to later phases", () => {
-    it("refuses to modify labels or watch", async () => {
-      const provider = createGmailProvider(CONTEXT);
+  describe("watching", () => {
+    it("asks Gmail to publish to the configured topic and reports the expiry", async () => {
+      // Seven days out, as epoch milliseconds in a string — Gmail's own shape.
+      const expiration = String(Date.now() + 7 * 24 * 60 * 60_000);
+      usersWatch.mockResolvedValue({ data: { expiration, historyId: "99123" } });
 
-      await expect(provider.modifyLabels("t", [], [])).rejects.toThrow(/not implemented/);
-      await expect(provider.startWatch()).rejects.toThrow(/phase 7/);
-      await expect(provider.stopWatch()).rejects.toThrow(/phase 7/);
+      const result = await createGmailProvider(CONTEXT).startWatch();
+
+      expect(usersWatch).toHaveBeenCalledWith(
+        { userId: "me", requestBody: { topicName: TOPIC } },
+        {},
+      );
+      expect(result.cursor).toBe("99123");
+      expect(result.expiresAt.getTime()).toBe(Number(expiration));
+      expect(acquireGmailQuota).toHaveBeenCalledWith("mail_1", "users.watch", undefined);
+    });
+
+    it("sets no label filter, so sent mail is pushed too", async () => {
+      // Watching INBOX alone would be cheaper and would make the user's own sent mail
+      // invisible to push — which is what the writing-style profile is built from.
+      usersWatch.mockResolvedValue({
+        data: { expiration: String(Date.now() + 1000), historyId: "1" },
+      });
+
+      await createGmailProvider(CONTEXT).startWatch();
+
+      const body = usersWatch.mock.calls[0]?.[0]?.requestBody as Record<string, unknown>;
+      expect(body).not.toHaveProperty("labelIds");
+      expect(body).not.toHaveProperty("labelFilterAction");
+    });
+
+    it("refuses when no Pub/Sub topic is configured", async () => {
+      env.GMAIL_PUBSUB_TOPIC = "";
+
+      await expect(createGmailProvider(CONTEXT).startWatch()).rejects.toThrow(
+        /GMAIL_PUBSUB_TOPIC is not set/,
+      );
+      expect(usersWatch).not.toHaveBeenCalled();
+    });
+
+    it("treats a watch with no expiration as an upstream fault", async () => {
+      usersWatch.mockResolvedValue({ data: { historyId: "1" } });
+
+      await expect(createGmailProvider(CONTEXT).startWatch()).rejects.toThrow(
+        /no expiration or history id/,
+      );
+    });
+
+    it("rejects an unreadable expiration rather than storing an invalid date", async () => {
+      // A NaN expiry would be written to `watchExpiresAt` and make every renewal check
+      // false, which is a watch that silently never renews.
+      usersWatch.mockResolvedValue({ data: { expiration: "soon", historyId: "1" } });
+
+      await expect(createGmailProvider(CONTEXT).startWatch()).rejects.toThrow(
+        /unreadable expiration/,
+      );
+    });
+
+    it("stops the watch with no argument, because Gmail has no watch id", async () => {
+      usersStop.mockResolvedValue({});
+
+      await createGmailProvider(CONTEXT).stopWatch();
+
+      expect(usersStop).toHaveBeenCalledWith({ userId: "me" }, {});
+      expect(acquireGmailQuota).toHaveBeenCalledWith("mail_1", "users.stop", undefined);
+    });
+  });
+
+  describe("an expired history id", () => {
+    it("becomes a typed expired-cursor error, not a generic 404", async () => {
+      /*
+       * Gmail keeps about a week of history and answers 404 for anything older. Left as
+       * a generic 404 this reads as "mailbox not found", burns job attempts, and leaves
+       * the mailbox frozen — so it becomes the one error the delta worker recovers from
+       * by re-syncing.
+       */
+      historyListFn.mockRejectedValue(
+        Object.assign(new Error("Requested entity was not found"), {
+          response: { status: 404 },
+        }),
+      );
+
+      await expect(createGmailProvider(CONTEXT).syncDelta("12345")).rejects.toThrow(
+        /history id is too old/,
+      );
+      // Not retried: a 404 is permanent and `withRetry` knows it.
+      expect(historyListFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("lets other history failures through as themselves", async () => {
+      // 400 rather than 500 on purpose: a 5xx is retryable, so asserting on it here
+      // would make this test sit through the real backoff curve.
+      historyListFn.mockRejectedValue(
+        Object.assign(new Error("boom"), { response: { status: 400 } }),
+      );
+
+      await expect(createGmailProvider(CONTEXT).syncDelta("12345")).rejects.toThrow(/boom/);
+    });
+  });
+
+  describe("methods belonging to later phases", () => {
+    it("refuses to modify labels", async () => {
+      await expect(createGmailProvider(CONTEXT).modifyLabels("t", [], [])).rejects.toThrow(
+        /not implemented/,
+      );
     });
   });
 });

@@ -108,6 +108,26 @@ export class AiDisabledError extends AppError {
   readonly code = "AI_DISABLED";
 }
 
+/**
+ * The provider no longer has the history we asked for.
+ *
+ * Gmail keeps roughly a week of `history.list` records and answers 404 for a
+ * `startHistoryId` older than that — which happens after a watch lapses, a long
+ * outage, or a paused mailbox. There is no incremental recovery from it: the only
+ * honest response is a full re-sync, so this is a distinct type rather than a
+ * generic upstream failure, and the delta worker keys its fallback on it.
+ */
+export class SyncCursorExpiredError extends AppError {
+  readonly statusCode = 409;
+  readonly code = "SYNC_CURSOR_EXPIRED";
+}
+
+/** Push notifications are not configured for this deployment (no Pub/Sub topic). */
+export class PushNotConfiguredError extends AppError {
+  readonly statusCode = 409;
+  readonly code = "PUSH_NOT_CONFIGURED";
+}
+
 export function isAppError(error: unknown): error is AppError {
   return error instanceof AppError;
 }

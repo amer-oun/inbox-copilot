@@ -15,6 +15,7 @@ import {
 } from "../lib/queues.js";
 import { enqueueEnrichment } from "./ai/enrich.js";
 import { enqueueStyleProfile } from "./ai/style.js";
+import { ensureWatch, pushConfigured } from "./watch.js";
 import { fetchThreads } from "../providers/gmail/client.js";
 import { mailProviderFor } from "../providers/registry.js";
 import { threadParticipants } from "../providers/gmail/map.js";
@@ -369,6 +370,24 @@ export async function runBackfill(
      * a quality feature.
      */
     await enqueueStyleProfile({ userId: job.userId });
+
+    /*
+     * Push starts here rather than at connect time, and only now: a watch is only
+     * useful once there is a cursor to be incremental from, and Gmail's notifications
+     * during a 90-day backfill would queue deltas against a mailbox that is already
+     * reading everything.
+     *
+     * Failure is logged, never thrown. The mailbox has just synced correctly; an
+     * unconfigured or failing Pub/Sub topic must not turn that into a failed backfill,
+     * and the hourly keeper retries every mailbox anyway.
+     */
+    if (pushConfigured()) {
+      try {
+        await ensureWatch({ userId: job.userId, mailAccountId });
+      } catch (error) {
+        log.warn({ err: error }, "backfill finished but the gmail watch could not start");
+      }
+    }
 
     log.info(
       { ...progress, cursor: historyCursor, resumed: resuming },

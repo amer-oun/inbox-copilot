@@ -5,6 +5,7 @@ import { healthRouter } from "./routes/health.js";
 import { mailAccountsRouter } from "./routes/mailAccounts.js";
 import { oauthRouter } from "./routes/oauth.js";
 import { replyRouter } from "./routes/reply.js";
+import { webhooksRouter } from "./routes/webhooks.js";
 import { threadsRouter } from "./routes/threads.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 
@@ -37,6 +38,9 @@ export function createApp(): Express {
   // Browser-facing (authenticated by signed OAuth state) before BFF-facing
   // (authenticated by the internal JWT).
   app.use(oauthRouter);
+  // Provider push. Authenticated by a Google-signed OIDC token, not the internal JWT
+  // (routes/webhooks.ts), so it is mounted with the other externally-called route.
+  app.use(webhooksRouter);
   app.use(mailAccountsRouter);
   app.use(threadsRouter);
   app.use(replyRouter);

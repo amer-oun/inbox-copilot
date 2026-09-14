@@ -214,21 +214,76 @@ Fewer than three usable samples writes **nothing** — not even an empty row. Th
 prompt asks whether a profile exists, and an empty one would be followed as a
 description of a writer nobody has read.
 
+## Real-time sync (Gmail push)
+
+Gmail does not call us: it publishes to a Pub/Sub topic, and a push subscription calls
+`POST /webhooks/gmail` with a Google-signed OIDC token. Setting that up in Google Cloud
+— including how to test it from a laptop Google cannot reach — is
+**docs/gmail-push-setup.md**. Without `GMAIL_PUBSUB_TOPIC` the app runs fine, just not in
+real time.
+
+**A push is a trigger, never data.** The webhook verifies the token (signature, issuer,
+audience, our service account), decodes the payload far enough to know *which mailbox*,
+and enqueues a delta. The history id it carries is logged and discarded: believing it
+would let whoever can publish to the topic decide how far back we read, or skip history
+we never fetched. Everything written comes from an authenticated Gmail read we initiate.
+So the worst a compromised topic achieves is making us re-read a mailbox we already have
+access to.
+
+**Bursts collapse.** Gmail publishes one notification per change, so a four-message
+thread arrives as four pushes. The mailbox id is the delta job's id *and* its dedup key,
+with a 2-second delay: the first push queues a delayed job, the rest land on the same id
+and do nothing. Measured on a real mailbox: five pushes, one sync.
+
+**The cursor advances last.** Only after every thread a delta touched has committed, and
+only to the value the provider reported for that window. A crash halfway is a replay, and
+every write is idempotent on `(mailAccountId, providerMessageId)` — so a replay is a
+no-op. When a delta defers threads (more than 40 changed at once) the cursor does not
+move at all: their changes are inside that window.
+
+**Enrichment is queued for new *inbound* messages only.** New, because a label change
+re-fetches the whole thread and re-enriching it would pay for classifications we already
+hold — which is why `syncOneThread` asks which messages exist *before* upserting them.
+Inbound, because classifying the user's own sent mail would put a priority score and
+"needs reply" on their own words.
+
+## When sync goes quiet
+
+Two failures matter, and neither announces itself — an inbox with no new mail looks
+exactly like a working one.
+
+1. **The watch expired.** Gmail's watch lasts seven days. `services/watch.ts` renews any
+   with less than two days left, so a renewal has to fail repeatedly before push lapses.
+2. **The watch is live but notifications are not arriving** — a deleted subscription, a
+   revoked topic permission, our endpoint failing for an hour. Nothing in our own data
+   says so; the only symptom is silence. So the keeper also queues a catch-up delta for
+   any mailbox that has not synced in an hour, whatever its `watchExpiresAt` says.
+
+The keeper runs **hourly**, not daily. Renewal only needs a daily cadence, but
+discovering a lapse within an hour rather than a day is the difference between a gap and
+an outage; when nothing is wrong the run is one indexed query.
+
+**An expired cursor is a re-sync, not an error.** `history.list` answers 404 for a
+`startHistoryId` older than about a week. That is a `SyncCursorExpiredError` (mapped in
+the Gmail client, not left as a bare 404), and the delta worker clears the cursor and
+queues a full backfill — because a mailbox that cannot catch up incrementally must not be
+left quietly frozen. Verified on the real mailbox by forcing `syncCursor` to `1`: cursor
+cleared → backfill → (it hit a Gmail rate limit, went to ERROR, retried on its own
+curve) → ACTIVE with a fresh cursor, 63 threads and no duplicates.
+
 ## Current phase
-> Phase 6 — Replies: DONE. `services/ai/style.ts` (writing-style profile, `ai.style`
-> queue, built after backfill and on demand), `services/ai/reply.ts` (three drafts per
-> thread per tone, persisted to `ReplyDraft`), `services/ai/compose.ts` (new message
-> from an intent, a recipient and prior correspondence with them),
-> `providers/gmail/mime.ts` + `sendMessage`/`createDraft` in `GmailProvider`, and
-> `services/send.ts` — the only code in the application that puts mail on the wire.
-> Routes in `routes/reply.ts`; UI in `components/thread/ReplyComposer.tsx`, reached
-> through the BFF proxy, which is now GET+POST with a separate allowlist per method and
-> an Origin check on writes.
-> Read "Replies, composing and sending" and "Writing style profile" above before
-> touching any of it.
-> Verified against real Gmail once, self-addressed (a `+tag` alias of the mailbox, so
-> the reply ran through `replyRecipients` for real): parent and reply landed in one
-> conversation with `In-Reply-To` and `References` pointing at the parent.
-> Next: Phase 7 — push notifications (Gmail watch / Graph subscriptions) so the
-> mailbox updates without polling.
+> Phase 7 — Real-time sync: DONE for Gmail. `startWatch`/`stopWatch` in
+> `GmailProvider`, `POST /webhooks/gmail` (`routes/webhooks.ts` + `lib/pubsub.ts`),
+> `services/deltaSync.ts` (the `sync.delta` job), `services/watch.ts` (the hourly
+> `sync.watch` keeper), and the Google Cloud setup in `docs/gmail-push-setup.md`.
+> Read "Real-time sync (Gmail push)" and "When sync goes quiet" above before touching
+> any of it.
+> Verified live end to end against the real mailbox with the development token: five
+> pushes collapsed into one delta, 6 changes read from the stored cursor, 4 threads and
+> 6 messages written, 0 enriched (all outbound), cursor advanced only afterwards. The
+> expired-cursor fallback was verified by forcing a stale cursor. Not yet verified: a
+> genuine Pub/Sub delivery, which needs the Google Cloud setup and a public URL.
+> Next: Phase 8 — Outlook. The `MailProvider` port is the seam; Graph subscriptions
+> replace Gmail watches and `deltaLink` replaces the history id, behind the same
+> interface.
 > Update this line as we progress.

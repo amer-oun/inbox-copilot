@@ -166,7 +166,14 @@ function asErrorish(error: unknown): GoogleApiErrorish {
   return (typeof error === "object" && error !== null ? error : {}) as GoogleApiErrorish;
 }
 
-function statusOf(error: unknown): number | undefined {
+/**
+ * HTTP status of a provider error, wherever the SDK hung it.
+ *
+ * Exported because one caller needs to act on a specific code rather than on
+ * "retryable or not": a 404 from `history.list` means the cursor has expired, which
+ * is a different recovery from every other failure (see providers/gmail/client.ts).
+ */
+export function statusOf(error: unknown): number | undefined {
   const e = asErrorish(error);
   const candidate = e.response?.status ?? e.status ?? e.code;
   return typeof candidate === "number" ? candidate : undefined;

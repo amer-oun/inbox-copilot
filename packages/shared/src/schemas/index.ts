@@ -6,3 +6,4 @@ export * from "./mailAccount.js";
 export * from "./reply.js";
 export * from "./sync.js";
 export * from "./thread.js";
+export * from "./webhook.js";

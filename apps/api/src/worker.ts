@@ -7,7 +7,10 @@ import {
   aiEnrichJobSchema,
   aiStyleJobSchema,
   aiSweepJobSchema,
+  deltaJobSchema,
+  watchJobSchema,
   scheduleAiSweep,
+  scheduleWatchKeeper,
   backfillJobSchema,
   bullConnection,
   closeQueues,
@@ -16,11 +19,15 @@ import {
   type AiStyleJob,
   type AiSweepJob,
   type BackfillJob,
+  type DeltaJob,
+  type WatchJob,
 } from "./lib/queues.js";
 import { runBackfill } from "./services/sync.js";
 import { runEnrich } from "./services/ai/enrich.js";
 import { sweepAllEnrichment } from "./services/ai/sweep.js";
 import { buildWritingStyle } from "./services/ai/style.js";
+import { runDelta } from "./services/deltaSync.js";
+import { runWatchKeeper } from "./services/watch.js";
 import { MailAccountRevokedError, NotFoundError } from "./lib/errors.js";
 import { ConflictError } from "./lib/errors.js";
 
@@ -198,6 +205,68 @@ async function processStyle(job: Job<AiStyleJob>): Promise<void> {
   );
 }
 
+/**
+ * One incremental sync (§4), triggered by a push or by the keeper.
+ *
+ * Aborted on failure like a backfill, and for the same reason: BullMQ abandons the
+ * attempt but not its in-flight Gmail requests, and two attempts reading the same
+ * mailbox rate-limit each other.
+ */
+async function processDelta(job: Job<DeltaJob>): Promise<void> {
+  const payload = deltaJobSchema.parse(job.data);
+  const log = logger.child({
+    userId: payload.userId,
+    mailAccountId: payload.mailAccountId,
+  });
+
+  const controller = new AbortController();
+  const key = `delta-${job.id ?? payload.mailAccountId}`;
+  inFlight.set(key, controller);
+
+  try {
+    const result = await runDelta(payload, { signal: controller.signal });
+    log.debug(
+      {
+        jobId: job.id,
+        threads: result.threads,
+        messages: result.messages,
+        enriched: result.enriched,
+        skipped: result.skipped ?? null,
+        recovered: result.recovered ?? null,
+      },
+      "delta job finished",
+    );
+  } catch (error) {
+    if (isPermanent(error)) {
+      const message = error instanceof Error ? error.message : "permanent failure";
+      log.warn({ jobId: job.id, err: error }, "delta cannot be retried");
+      throw new UnrecoverableError(message);
+    }
+    throw error;
+  } finally {
+    controller.abort();
+    inFlight.delete(key);
+  }
+}
+
+/**
+ * The watch keeper (§4): renew expiring Gmail watches, and queue a catch-up delta for
+ * any mailbox whose push is not live or has gone quiet.
+ *
+ * Never throws per mailbox — `runWatchKeeper` counts failures and continues — so one
+ * revoked grant cannot stop everyone else's watch from being renewed.
+ */
+async function processWatch(job: Job<WatchJob>): Promise<void> {
+  const payload = watchJobSchema.parse(job.data);
+  const result = await runWatchKeeper(
+    payload.force === true ? { force: true } : {},
+  );
+
+  if (result.renewed > 0 || result.caughtUp > 0 || result.failed > 0) {
+    logger.info({ jobId: job.id, ...result }, "watch keeper queued work");
+  }
+}
+
 const worker = new Worker<BackfillJob>(QUEUE_NAMES.syncBackfill, processBackfill, {
   connection: bullConnection,
   concurrency: WORKER_CONCURRENCY,
@@ -212,6 +281,50 @@ const enrichWorker = new Worker<AiEnrichJob>(QUEUE_NAMES.aiEnrich, processEnrich
 const sweepWorker = new Worker<AiSweepJob>(QUEUE_NAMES.aiSweep, processSweep, {
   connection: bullConnection,
   concurrency: 1,
+});
+
+/**
+ * Deltas run wider than backfills and narrower than enrichment: each is a handful of
+ * Gmail reads for one mailbox, and the per-mailbox quota bucket paces them anyway.
+ */
+const deltaWorker = new Worker<DeltaJob>(QUEUE_NAMES.syncDelta, processDelta, {
+  connection: bullConnection,
+  concurrency: 4,
+});
+
+deltaWorker.on("failed", (job, error) => {
+  abortJob(`delta-${job?.id}`, "job failed");
+  logger.error(
+    { queue: QUEUE_NAMES.syncDelta, jobId: job?.id, attempts: job?.attemptsMade, err: error },
+    "delta job failed",
+  );
+});
+
+deltaWorker.on("stalled", (jobId) => {
+  abortJob(`delta-${jobId}`, "job stalled");
+  logger.warn({ queue: QUEUE_NAMES.syncDelta, jobId }, "delta job stalled");
+});
+
+deltaWorker.on("error", (error) => {
+  logger.warn({ err: error }, "delta worker error");
+});
+
+const watchWorker = new Worker<WatchJob>(QUEUE_NAMES.syncWatch, processWatch, {
+  connection: bullConnection,
+  // One at a time: it walks every mailbox, and two concurrent runs would race to renew
+  // the same watches.
+  concurrency: 1,
+});
+
+watchWorker.on("failed", (job, error) => {
+  logger.error(
+    { queue: QUEUE_NAMES.syncWatch, jobId: job?.id, err: error },
+    "watch keeper failed",
+  );
+});
+
+watchWorker.on("error", (error) => {
+  logger.warn({ err: error }, "watch worker error");
 });
 
 const styleWorker = new Worker<AiStyleJob>(QUEUE_NAMES.aiStyle, processStyle, {
@@ -253,6 +366,10 @@ await connectRedis();
 // Registered here rather than at enqueue time: the schedule is a property of the
 // worker deployment, and upserting it makes a restart converge on one schedule.
 await scheduleAiSweep();
+
+// The watch keeper, on the same terms: a property of the deployment, converging on one
+// schedule however many times a worker restarts.
+await scheduleWatchKeeper();
 
 enrichWorker.on("failed", (job, error) => {
   abortJob(`enrich-${job?.id}`, "job failed");
@@ -308,6 +425,8 @@ logger.info(
       QUEUE_NAMES.aiEnrich,
       QUEUE_NAMES.aiSweep,
       QUEUE_NAMES.aiStyle,
+      QUEUE_NAMES.syncDelta,
+      QUEUE_NAMES.syncWatch,
     ],
     concurrency: { backfill: WORKER_CONCURRENCY, enrich: ENRICH_CONCURRENCY },
     env: env.NODE_ENV,
@@ -326,6 +445,8 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     enrichWorker.close(),
     sweepWorker.close(),
     styleWorker.close(),
+    deltaWorker.close(),
+    watchWorker.close(),
   ]);
   await Promise.allSettled([closeQueues(), disconnectRedis(), disconnectDatabase()]);
   process.exit(0);

@@ -16,6 +16,8 @@ export const QUEUE_NAMES = {
   aiEnrich: "ai.enrich",
   aiSweep: "ai.sweep",
   aiStyle: "ai.style",
+  syncDelta: "sync.delta",
+  syncWatch: "sync.watch",
 } as const;
 
 /**
@@ -68,6 +70,29 @@ export const aiStyleJobSchema = z.object({
   force: z.boolean().optional(),
 });
 export type AiStyleJob = z.infer<typeof aiStyleJobSchema>;
+
+/**
+ * One incremental sync of one mailbox (§4).
+ *
+ * `reason` is diagnostic: "webhook" is the fast path, and a mailbox whose deltas all
+ * say "sweep" is a mailbox whose push has quietly stopped working.
+ */
+export const deltaJobSchema = z.object({
+  mailAccountId: z.string().min(1),
+  userId: z.string().min(1),
+  reason: z.enum(["webhook", "sweep", "watch-renewed", "manual"]).default("webhook"),
+});
+export type DeltaJob = z.infer<typeof deltaJobSchema>;
+
+/**
+ * The watch keeper: renew what is about to expire, and catch up anything whose push
+ * has lapsed. No payload — it always means "check every mailbox".
+ */
+export const watchJobSchema = z.object({
+  /** Renew even watches that are not near expiry. */
+  force: z.boolean().optional(),
+});
+export type WatchJob = z.infer<typeof watchJobSchema>;
 
 export const bullConnection: ConnectionOptions = {
   url: env.REDIS_URL,
@@ -130,6 +155,8 @@ let backfillQueue: Queue<BackfillJob> | undefined;
 let enrichQueue: Queue<AiEnrichJob> | undefined;
 let sweepQueue: Queue<AiSweepJob> | undefined;
 let styleQueue: Queue<AiStyleJob> | undefined;
+let deltaQueue: Queue<DeltaJob> | undefined;
+let watchQueue: Queue<WatchJob> | undefined;
 
 /** Lazily constructed: importing this module must not open a connection. */
 export function syncBackfillQueue(): Queue<BackfillJob> {
@@ -223,15 +250,95 @@ export function aiStyleJobId(userId: string): string {
   return `style-${userId}`;
 }
 
+/**
+ * How long a webhook-triggered delta waits before running.
+ *
+ * A short delay is what makes bursts collapse. Gmail publishes a notification per
+ * change, so a thread with four new messages arrives as four pushes within a second;
+ * with the mailbox id as the job id, the first push queues a delayed job and the next
+ * three land on the same id and do nothing. One sync, four notifications.
+ *
+ * Two seconds is chosen against human perception rather than machine cost: it is below
+ * the time it takes to switch to the tab, and well above the spacing of a burst.
+ */
+export const DELTA_DEBOUNCE_MS = 2_000;
+
+/**
+ * Deltas are per mailbox, so the id is the dedup key (§4). A second notification for a
+ * mailbox already queued is a no-op, which is the point.
+ */
+export function deltaJobId(mailAccountId: string): string {
+  // No colon: BullMQ builds its own Redis keys with `:` as the separator.
+  return `delta-${mailAccountId}`;
+}
+
+export function syncDeltaQueue(): Queue<DeltaJob> {
+  deltaQueue ??= new Queue<DeltaJob>(QUEUE_NAMES.syncDelta, {
+    connection: bullConnection,
+    defaultJobOptions: {
+      /*
+       * Three attempts on a 15-second curve. Unlike a backfill, a delta is small and
+       * cheap to repeat, and the thing it usually fails on — a transient Gmail error —
+       * clears in seconds. It is also self-healing: the cursor has not moved, so a
+       * later delta covers whatever this one missed.
+       */
+      attempts: 3,
+      backoff: { type: "exponential", delay: 15_000 },
+      removeOnComplete: { age: 3_600, count: 200 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  return deltaQueue;
+}
+
+export function syncWatchQueue(): Queue<WatchJob> {
+  watchQueue ??= new Queue<WatchJob>(QUEUE_NAMES.syncWatch, {
+    connection: bullConnection,
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: { age: 24 * 3_600, count: 50 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  return watchQueue;
+}
+
+/**
+ * How often the watch keeper runs.
+ *
+ * Hourly, not daily, even though a Gmail watch lasts seven days and is renewed with a
+ * two-day margin — so renewal itself happens on a daily-or-better cadence either way.
+ * The hourly tick is for the *other* half of this job: a mailbox whose watch has
+ * lapsed, or whose push is silently broken, is a mailbox receiving no mail as far as
+ * the user can tell. Discovering that within an hour costs one indexed query per run;
+ * discovering it within a day is a day of an inbox that looks empty.
+ */
+export const WATCH_INTERVAL_MS = 60 * 60_000;
+
+export const WATCH_SCHEDULER_ID = "sync-watch-hourly";
+
+/** Registers the repeatable watch keeper. Idempotent, like the AI sweep. */
+export async function scheduleWatchKeeper(): Promise<void> {
+  await syncWatchQueue().upsertJobScheduler(
+    WATCH_SCHEDULER_ID,
+    { every: WATCH_INTERVAL_MS },
+    { name: "watch", data: {} },
+  );
+}
+
 export async function closeQueues(): Promise<void> {
   await Promise.all([
     backfillQueue?.close(),
     enrichQueue?.close(),
     sweepQueue?.close(),
     styleQueue?.close(),
+    deltaQueue?.close(),
+    watchQueue?.close(),
   ]);
   backfillQueue = undefined;
   enrichQueue = undefined;
   sweepQueue = undefined;
   styleQueue = undefined;
+  deltaQueue = undefined;
+  watchQueue = undefined;
 }

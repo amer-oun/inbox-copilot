@@ -1,7 +1,13 @@
 import { google, type gmail_v1 } from "googleapis";
-import { NotFoundError, UpstreamError } from "../../lib/errors.js";
+import {
+  NotFoundError,
+  PushNotConfiguredError,
+  SyncCursorExpiredError,
+  UpstreamError,
+} from "../../lib/errors.js";
+import { env } from "../../lib/env.js";
 import { logger } from "../../lib/logger.js";
-import { mapWithConcurrency, withRetry } from "../../lib/retry.js";
+import { mapWithConcurrency, reasonOf, statusOf, withRetry } from "../../lib/retry.js";
 import { acquireGmailQuota, type GmailMethod } from "../../lib/rateLimiter.js";
 import { getAccessToken } from "../tokenManager.js";
 import { htmlToText } from "../../lib/html.js";
@@ -95,6 +101,42 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
     await acquireGmailQuota(context.mailAccountId, method, signal);
     const gmail = await api();
     return fn(gmail, signal ? { signal } : {});
+  }
+
+      /**
+   * One page of `history.list`, with the one error that is not a failure.
+   *
+   * Gmail keeps roughly a week of history and answers 404 for a `startHistoryId`
+   * older than that — after a lapsed watch, a long outage, or a paused mailbox.
+   * That is not a transient upstream error and it will never succeed on retry, so it
+   * is translated here into the type the delta worker recovers from by re-syncing.
+   * Left as a generic 404 it would look like "mailbox not found" and burn three
+   * attempts proving it.
+   */
+  async function readHistoryPage(cursor: string, pageToken: string | undefined) {
+    try {
+      return await call("users.history.list", async (gmail, requestOptions) =>
+        gmail.users.history.list(
+          {
+            userId: "me",
+            startHistoryId: cursor,
+            ...(pageToken === undefined ? {} : { pageToken }),
+          },
+          requestOptions,
+        ),
+      );
+    } catch (error) {
+      if (statusOf(error) === 404) {
+        log.warn(
+          { cursor, reason: reasonOf(error) },
+          "gmail no longer has this history id; a full re-sync is the only recovery",
+        );
+        throw new SyncCursorExpiredError("Gmail history id is too old to sync from", {
+          cursor,
+        });
+      }
+      throw error;
+    }
   }
 
   return {
@@ -204,16 +246,7 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
       let newCursor = cursor;
 
       do {
-        const response = await call("users.history.list", async (gmail, requestOptions) =>
-          gmail.users.history.list(
-            {
-              userId: "me",
-              startHistoryId: cursor,
-              ...(pageToken === undefined ? {} : { pageToken }),
-            },
-            requestOptions,
-          ),
-        );
+        const response = await readHistoryPage(cursor, pageToken);
 
         newCursor = response.data.historyId ?? newCursor;
 
@@ -315,12 +348,73 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
       throw new UpstreamError("Gmail modifyLabels is not implemented yet");
     },
 
-    async startWatch(): Promise<never> {
-      throw new UpstreamError("Gmail watch is not implemented until phase 7");
+    /**
+     * Asks Gmail to publish this mailbox's changes to our Pub/Sub topic (§4).
+     *
+     * Gmail has no per-watch identifier: one mailbox has at most one watch, `stop`
+     * takes no argument, and calling `watch` again replaces whatever was there. So
+     * there is nothing to store as a handle — the caller records the *topic* as the
+     * resource id, which is the fact worth keeping: it says where notifications will
+     * arrive, and a topic change is the one reason a stored watch is stale.
+     *
+     * No label filter. Watching INBOX alone would be cheaper in notifications, but it
+     * would also make sent mail invisible to push — and sent mail is what the writing
+     * style profile is built from, and what makes a thread's last message ours.
+     */
+    async startWatch() {
+      if (env.GMAIL_PUBSUB_TOPIC === "") {
+        throw new PushNotConfiguredError(
+          "GMAIL_PUBSUB_TOPIC is not set; real-time sync is unavailable",
+        );
+      }
+
+      const response = await call("users.watch", async (gmail, requestOptions) =>
+        gmail.users.watch(
+          {
+            userId: "me",
+            requestBody: { topicName: env.GMAIL_PUBSUB_TOPIC },
+          },
+          requestOptions,
+        ),
+      );
+
+      const expiration = response.data.expiration;
+      const historyId = response.data.historyId;
+
+      if (!expiration || !historyId) {
+        throw new UpstreamError("Gmail watch returned no expiration or history id");
+      }
+
+      /*
+       * `expiration` is epoch milliseconds as a string, and Gmail's ceiling is seven
+       * days. It is returned rather than assumed: the renewal window is computed from
+       * what Gmail actually promised, not from our idea of its policy.
+       */
+      const expiresAt = new Date(Number(expiration));
+      if (Number.isNaN(expiresAt.getTime())) {
+        throw new UpstreamError("Gmail watch returned an unreadable expiration");
+      }
+
+      log.info(
+        { expiresAt: expiresAt.toISOString(), topic: env.GMAIL_PUBSUB_TOPIC },
+        "gmail watch started",
+      );
+
+      return { expiresAt, cursor: historyId };
     },
 
-    async stopWatch(): Promise<never> {
-      throw new UpstreamError("Gmail watch is not implemented until phase 7");
+    /**
+     * Stops notifications for this mailbox.
+     *
+     * Idempotent as far as callers are concerned: Gmail answers 204 whether or not a
+     * watch existed, so "stop something that was never started" is a success. Called
+     * on disconnect, and before a re-watch is unnecessary — `watch` replaces.
+     */
+    async stopWatch() {
+      await call("users.stop", async (gmail, requestOptions) =>
+        gmail.users.stop({ userId: "me" }, requestOptions),
+      );
+      log.info("gmail watch stopped");
     },
   };
 }

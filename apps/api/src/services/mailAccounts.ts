@@ -9,6 +9,7 @@ import {
 import { env } from "../lib/env.js";
 import { NotFoundError, ProviderAuthError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
+import { stopWatchForMailbox } from "./watch.js";
 import { createOAuthState } from "../lib/oauthState.js";
 import { oauthClientFor, redirectUriFor } from "../providers/registry.js";
 import { revokeMailboxGrant, tokenVaultFields } from "../providers/tokenManager.js";
@@ -208,11 +209,26 @@ export async function disconnectMailAccount(input: {
   const db = dbForUser(input.userId);
   const existing = await db.mailAccount.findFirst({
     where: { id: input.mailAccountId },
-    select: { id: true },
+    // The watch fields ride along: stopping push needs them, and this is the last
+    // moment the row exists.
+    select: {
+      id: true,
+      provider: true,
+      emailAddress: true,
+      watchExpiresAt: true,
+    },
   });
   if (!existing) {
     throw new NotFoundError("Mailbox not found");
   }
+
+  /*
+   * Stop push first, while the row and its tokens still exist: `users.stop` needs an
+   * access token, and after the delete there is nothing left to authenticate with. A
+   * failure here is logged, not thrown (services/watch.ts) — an unstoppable watch
+   * expires within a week, and its notifications already resolve to no mailbox.
+   */
+  await stopWatchForMailbox(input.userId, existing);
 
   // Revocation is best effort and deliberately not transactional: if it fails we
   // still delete, and the response says the grant may still be live so the user
