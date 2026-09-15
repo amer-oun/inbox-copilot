@@ -9,6 +9,7 @@ import {
   syncStatusResponseSchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
+import { requestIdOf } from "../lib/requestId.js";
 import {
   disconnectMailAccount,
   listMailAccounts,
@@ -45,7 +46,13 @@ mailAccountsRouter.delete("/mail-accounts/:mailAccountId", async (req, res) => {
 
   // 200, not 204: the caller needs to know whether the provider grant is really
   // gone, and where to finish the job when it is not.
-  const outcome = await disconnectMailAccount({ userId, mailAccountId });
+  // The request id travels with it, so the audit row points back at this request's
+  // log lines (lib/requestId.ts).
+  const outcome = await disconnectMailAccount({
+    userId,
+    mailAccountId,
+    requestId: requestIdOf(req),
+  });
   res.status(200).json(disconnectMailAccountResponseSchema.parse(outcome));
 });
 

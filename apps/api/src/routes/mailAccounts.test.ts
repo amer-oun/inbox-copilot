@@ -202,6 +202,9 @@ describe("mail account routes", () => {
       expect(disconnectMailAccount).toHaveBeenCalledWith({
         userId: USER_ID,
         mailAccountId: MAIL_ACCOUNT_ID,
+        // Threaded through for the audit row, so a vanished mailbox can be traced back
+        // to the request that removed it.
+        requestId: expect.any(String),
       });
     });
 

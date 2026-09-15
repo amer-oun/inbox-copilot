@@ -12,24 +12,42 @@ import { encrypt } from "../lib/crypto.js";
 
 const findFirst = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
+const eventCreate = vi.hoisted(() => vi.fn());
 const revokeAccess = vi.hoisted(() => vi.fn());
 const calls = vi.hoisted(() => [] as string[]);
 
-vi.mock("@inbox-copilot/db", () => ({
-  dbForUser: () => ({
-    mailAccount: {
-      findFirst,
-      delete: (...args: unknown[]) => {
-        calls.push("delete");
-        return del(...args);
-      },
-      update: vi.fn(),
-      create: vi.fn(),
-      findMany: vi.fn(),
+/**
+ * The delete and the audit row happen inside one transaction, so the mock provides one:
+ * `$transaction(fn)` hands back a client whose writes push onto `calls`, which is how the
+ * ordering assertions below can see both of them.
+ */
+vi.mock("@inbox-copilot/db", () => {
+  const mailAccount = {
+    findFirst,
+    delete: (...args: unknown[]) => {
+      calls.push("delete");
+      return del(...args);
     },
-  }),
-  Prisma: { PrismaClientKnownRequestError: class extends Error {} },
-}));
+    update: vi.fn(),
+    create: vi.fn(),
+    findMany: vi.fn(),
+  };
+  const mailAccountEvent = {
+    create: (...args: unknown[]) => {
+      calls.push("audit");
+      return eventCreate(...args);
+    },
+  };
+  const client = {
+    mailAccount,
+    mailAccountEvent,
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(client),
+  };
+  return {
+    dbForUser: () => client,
+    Prisma: { PrismaClientKnownRequestError: class extends Error {} },
+  };
+});
 vi.mock("./registry.js", () => ({
   oauthClientFor: () => ({
     revokeAccess: (...args: unknown[]) => {
@@ -72,6 +90,7 @@ describe("disconnectMailAccount", () => {
   beforeEach(() => {
     findFirst.mockReset();
     del.mockReset();
+    eventCreate.mockReset().mockResolvedValue({});
     revokeAccess.mockReset();
     calls.length = 0;
     del.mockResolvedValue({});
@@ -88,8 +107,93 @@ describe("disconnectMailAccount", () => {
       mailAccountId: MAIL_ACCOUNT_ID,
     });
 
-    expect(calls).toEqual(["revoke", "delete"]);
+    // Revoke at the provider, then record, then delete — and the record is inside the
+    // same transaction as the delete, so neither can happen without the other.
+    expect(calls).toEqual(["revoke", "audit", "delete"]);
     expect(outcome).toEqual({ revoked: true });
+  });
+
+  it("writes an audit row that survives the mailbox", async () => {
+    findFirst
+      .mockResolvedValueOnce({
+        id: MAIL_ACCOUNT_ID,
+        provider: "GMAIL",
+        emailAddress: "person@example.com",
+      })
+      .mockResolvedValueOnce(rowWithTokens());
+    revokeAccess.mockResolvedValue({ revoked: true });
+
+    await disconnectMailAccount({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      requestId: "req-abc-123",
+    });
+
+    expect(eventCreate.mock.calls[0]?.[0].data).toEqual({
+      kind: "DISCONNECTED",
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      provider: "GMAIL",
+      // The address, because "which mailbox vanished" is the question this answers.
+      emailAddress: "person@example.com",
+      requestId: "req-abc-123",
+      grantRevoked: true,
+    });
+  });
+
+  it("records that the grant was left live when revocation failed", async () => {
+    findFirst
+      .mockResolvedValueOnce({
+        id: MAIL_ACCOUNT_ID,
+        provider: "GMAIL",
+        emailAddress: "person@example.com",
+      })
+      .mockResolvedValueOnce(rowWithTokens());
+    revokeAccess.mockRejectedValue(new Error("provider unreachable"));
+
+    await disconnectMailAccount({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+
+    expect(eventCreate.mock.calls[0]?.[0].data).toMatchObject({ grantRevoked: false });
+  });
+
+  it("records a null request id rather than inventing one", async () => {
+    // A disconnect from a script or a worker did not come from a request, and the row
+    // should say so instead of implying a correlation that leads nowhere.
+    findFirst
+      .mockResolvedValueOnce({
+        id: MAIL_ACCOUNT_ID,
+        provider: "GMAIL",
+        emailAddress: "person@example.com",
+      })
+      .mockResolvedValueOnce(rowWithTokens());
+    revokeAccess.mockResolvedValue({ revoked: true });
+
+    await disconnectMailAccount({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+
+    expect(eventCreate.mock.calls[0]?.[0].data.requestId).toBeNull();
+  });
+
+  it("does not delete the mailbox when the audit row cannot be written", async () => {
+    /*
+     * The deliberate trade: a disconnect the system cannot account for is worse than a
+     * disconnect the user has to click twice. The insert throwing rolls the transaction
+     * back, so the mailbox is still there.
+     */
+    findFirst
+      .mockResolvedValueOnce({
+        id: MAIL_ACCOUNT_ID,
+        provider: "GMAIL",
+        emailAddress: "person@example.com",
+      })
+      .mockResolvedValueOnce(rowWithTokens());
+    revokeAccess.mockResolvedValue({ revoked: true });
+    eventCreate.mockRejectedValue(new Error("audit insert failed"));
+
+    await expect(
+      disconnectMailAccount({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID }),
+    ).rejects.toThrow(/audit insert failed/);
+
+    expect(del).not.toHaveBeenCalled();
   });
 
   it("hands the decrypted refresh token to the provider, not the ciphertext", async () => {

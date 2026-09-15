@@ -62,6 +62,7 @@ describe("GET /oauth/:provider/callback", () => {
       userId: USER_ID,
       provider: "google",
       code: "auth-code",
+      requestId: expect.any(String),
     });
   });
 

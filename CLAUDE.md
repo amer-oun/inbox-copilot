@@ -355,6 +355,49 @@ in the whole mailbox and stamped it on every thread. Put such a filter under `AN
 both predicates survive. The mocked tests could not see it — a mocked `dbForUser` has no
 extension — which is the argument for the live probe.
 
+## The mailbox audit trail
+
+A mailbox once disappeared with no persisted record of what removed it. The only evidence
+was a log line on stdout, and stdout does not survive the process — so every connect and
+disconnect now writes a `MailAccountEvent` row: kind, userId, mailAccountId, provider,
+email address, request id, and for a disconnect whether the grant was actually revoked.
+
+Three properties make it worth having, and all three are easy to break by accident:
+
+1. **No foreign key from `mailAccountId` to `MailAccount`.** A relation would cascade, so
+   the disconnect record would be deleted by the very delete it documents. The column
+   therefore names rows that no longer exist, which is the point rather than a defect.
+   Only `userId` is a real FK (a deleted user is account closure, and their addresses
+   should not outlive it).
+2. **Written inside the same transaction as the change.** A record written afterwards is
+   missing exactly when something died mid-delete, which is a case you go looking for it.
+   There is no `try/catch` around the insert: if it fails the transaction rolls back and
+   the mailbox stays connected. A disconnect the system cannot account for is worse than
+   one the user has to click twice.
+3. **The log line stays outside the transaction.** An earlier version logged from inside
+   `recordMailAccountEvent`, and the live probe caught it announcing a disconnect that then
+   rolled back. The durable record is the row; the line is for whoever is tailing, and the
+   callers already write one after the commit with the same `requestId`.
+
+`requestId` comes from `lib/requestId.ts`, which is also pino-http's `genReqId` — one
+definition, so the row and the log lines for a request carry the same value. It is a UUID
+rather than pino's default counter, because a counter restarts with the process and an id
+in an audit row has to stay meaningful across a deploy. An inbound `x-request-id` is
+honoured only if it is short and matches `[A-Za-z0-9._:-]+`: the value reaches a log line
+and a database column, so a newline in it would forge log entries.
+
+There is no route that reads these rows. Read them with `pnpm db:studio`, or:
+
+```sql
+select "createdAt", kind, "emailAddress", "mailAccountId", "requestId", "grantRevoked"
+from "MailAccountEvent" order by "createdAt" desc limit 20;
+```
+
+Only `disconnectMailAccount` deletes a `MailAccount`, reachable only through
+`DELETE /mail-accounts/:id` (the BFF proxy exposes GET and POST only, so that verb arrives
+via the web app's server action). Threads and messages go with it by cascade. If a mailbox
+is ever missing again, that table is the first place to look.
+
 ## Current phase
 > Phase 9 — Phishing and spam detection: DONE. `services/security/headers.ts` (layer 1),
 > `urls.ts` + `contacts.ts` (layer 2), `phishing.ts` (the rule table, the union, the model
@@ -372,6 +415,11 @@ extension — which is the argument for the live probe.
 > thread rollup landed on the right threads, and the appeal recorded without touching the
 > verdict. Not verified: real mail (there is none to assess), and the real model's judgment
 > — the stub answers layer 3 in development.
+> Also in this phase, after a mailbox went missing during it: the `MailAccountEvent` audit
+> trail (migration `20260915020000_mail_account_audit_events`, applied locally) and
+> `lib/requestId.ts`. Verified live against real Postgres — the audit rows survive the
+> cascade that removes the mailbox, a rolled-back disconnect leaves neither the delete nor
+> a phantom row, and another user sees none of it. See "The mailbox audit trail" above.
 > Next: Phase 8 — Outlook. The `MailProvider` port is the seam; Graph subscriptions replace
 > Gmail watches and `deltaLink` replaces the history id, behind the same interface. Layer 1
 > reads `authResults`, which `map.ts` fills per provider, so §6 needs no Outlook-specific

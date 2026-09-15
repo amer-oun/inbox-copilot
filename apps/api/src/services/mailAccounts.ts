@@ -9,6 +9,7 @@ import {
 import { env } from "../lib/env.js";
 import { NotFoundError, ProviderAuthError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
+import { recordMailAccountEvent } from "./mailAccountEvents.js";
 import { stopWatchForMailbox } from "./watch.js";
 import { createOAuthState } from "../lib/oauthState.js";
 import { oauthClientFor, redirectUriFor } from "../providers/registry.js";
@@ -101,8 +102,11 @@ export async function completeMailAccountConnect(input: {
   userId: string;
   provider: ProviderSlug;
   code: string;
+  /** For the audit trail, so a connect can be traced to its request. */
+  requestId?: string | null;
 }): Promise<MailAccountDto> {
   const { userId, provider, code } = input;
+  const requestId = input.requestId ?? null;
   const client = oauthClientFor(provider);
 
   const tokens = await client.exchangeCode({
@@ -145,32 +149,66 @@ export async function completeMailAccountConnect(input: {
   const log = logger.child({ userId });
 
   if (existing) {
-    const row = (await db.mailAccount.update({
-      where: { id: existing.id },
-      data: writable,
-      select: SAFE_SELECT,
+    /*
+     * The audit row goes in with the update, in one transaction. A record written
+     * afterwards is a record that is missing precisely when something failed in
+     * between — which is the case it exists for (services/mailAccountEvents.ts).
+     */
+    const row = (await db.$transaction(async (tx) => {
+      const updated = await tx.mailAccount.update({
+        where: { id: existing.id },
+        data: writable,
+        select: SAFE_SELECT,
+      });
+      await recordMailAccountEvent(tx, {
+        kind: "RECONNECTED",
+        userId,
+        mailAccountId: existing.id,
+        provider: providerType,
+        emailAddress: identity.emailAddress,
+        requestId,
+      });
+      return updated;
     })) as SafeRow;
+
     log.info(
-      { mailAccountId: row.id, provider: providerType },
+      { mailAccountId: row.id, provider: providerType, requestId, audit: "mail-account-event" },
       "reconnected existing mailbox",
     );
     return toDto(row);
   }
 
   try {
-    const row = (await db.mailAccount.create({
-      data: {
-        // The tenancy extension stamps `userId` too; passing it keeps the create
-        // input well-typed instead of casting the whole object.
+    /*
+     * A new mailbox, so its id does not exist until the create returns — which is why
+     * this is an interactive transaction rather than a batch: the audit row needs the
+     * id the create produced, and both must still land together or not at all.
+     */
+    const row = (await db.$transaction(async (tx) => {
+      const created = await tx.mailAccount.create({
+        data: {
+          // The tenancy extension stamps `userId` too; passing it keeps the create
+          // input well-typed instead of casting the whole object.
+          userId,
+          provider: providerType,
+          emailAddress: identity.emailAddress,
+          ...writable,
+        },
+        select: SAFE_SELECT,
+      });
+      await recordMailAccountEvent(tx, {
+        kind: "CONNECTED",
         userId,
+        mailAccountId: created.id,
         provider: providerType,
         emailAddress: identity.emailAddress,
-        ...writable,
-      },
-      select: SAFE_SELECT,
+        requestId,
+      });
+      return created;
     })) as SafeRow;
+
     log.info(
-      { mailAccountId: row.id, provider: providerType },
+      { mailAccountId: row.id, provider: providerType, requestId, audit: "mail-account-event" },
       "connected new mailbox",
     );
     return toDto(row);
@@ -180,16 +218,29 @@ export async function completeMailAccountConnect(input: {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
-      const row = (await db.mailAccount.update({
-        where: {
-          provider_emailAddress_userId: {
-            provider: providerType,
-            emailAddress: identity.emailAddress,
-            userId,
+      const row = (await db.$transaction(async (tx) => {
+        const updated = await tx.mailAccount.update({
+          where: {
+            provider_emailAddress_userId: {
+              provider: providerType,
+              emailAddress: identity.emailAddress,
+              userId,
+            },
           },
-        },
-        data: writable,
-        select: SAFE_SELECT,
+          data: writable,
+          select: SAFE_SELECT,
+        });
+        // RECONNECTED rather than CONNECTED: the row the winner created is the one
+        // being written to, and the trail should say so.
+        await recordMailAccountEvent(tx, {
+          kind: "RECONNECTED",
+          userId,
+          mailAccountId: updated.id,
+          provider: providerType,
+          emailAddress: identity.emailAddress,
+          requestId,
+        });
+        return updated;
       })) as SafeRow;
       return toDto(row);
     }
@@ -205,6 +256,8 @@ export async function completeMailAccountConnect(input: {
 export async function disconnectMailAccount(input: {
   userId: string;
   mailAccountId: string;
+  /** For the audit trail, so a disappearing mailbox can be traced to its request. */
+  requestId?: string | null;
 }): Promise<DisconnectMailAccountResponse> {
   const db = dbForUser(input.userId);
   const existing = await db.mailAccount.findFirst({
@@ -236,10 +289,41 @@ export async function disconnectMailAccount(input: {
   // grant with no row to find it by.
   const outcome = await revokeMailboxGrant(input.mailAccountId, input.userId);
 
-  await db.mailAccount.delete({ where: { id: existing.id } });
+  /*
+   * The audit row and the delete, in one transaction, the row first.
+   *
+   * This is the whole reason the table exists: a mailbox that disappears must leave
+   * something behind that says when, for whom, and from which request. Because
+   * `MailAccountEvent` has no foreign key to `MailAccount`, the cascade that takes the
+   * threads and messages does not take this row with them.
+   *
+   * If the insert fails the delete rolls back, and the mailbox stays connected. That is
+   * deliberate: a disconnect the system cannot account for is worse than a disconnect
+   * the user has to click twice.
+   */
+  await db.$transaction(async (tx) => {
+    await recordMailAccountEvent(tx, {
+      kind: "DISCONNECTED",
+      userId: input.userId,
+      mailAccountId: existing.id,
+      provider: existing.provider,
+      emailAddress: existing.emailAddress,
+      requestId: input.requestId ?? null,
+      grantRevoked: outcome.revoked,
+    });
+    await tx.mailAccount.delete({ where: { id: existing.id } });
+  });
+
   logger
     .child({ userId: input.userId, mailAccountId: input.mailAccountId })
-    .info({ revoked: outcome.revoked }, "disconnected mailbox");
+    .info(
+      {
+        revoked: outcome.revoked,
+        requestId: input.requestId ?? null,
+        audit: "mail-account-event",
+      },
+      "disconnected mailbox",
+    );
 
   return outcome.manageUrl === undefined
     ? { revoked: outcome.revoked }

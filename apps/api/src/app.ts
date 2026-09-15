@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import { pinoHttp } from "pino-http";
 import { logger, redactUrl } from "./lib/logger.js";
+import { generateRequestId } from "./lib/requestId.js";
 import { healthRouter } from "./routes/health.js";
 import { mailAccountsRouter } from "./routes/mailAccounts.js";
 import { oauthRouter } from "./routes/oauth.js";
@@ -20,6 +21,12 @@ export function createApp(): Express {
   app.use(
     pinoHttp({
       logger,
+      /*
+       * One id per request, shared by the log and by `MailAccountEvent.requestId`
+       * (lib/requestId.ts). pino-http's default is a counter that restarts with the
+       * process, which makes an id in an audit row unfollowable after a deploy.
+       */
+      genReqId: generateRequestId,
       // /health is polled by the orchestrator; don't drown the log in it.
       autoLogging: { ignore: (req) => req.url === "/health" },
       serializers: {

@@ -29,15 +29,16 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  mailAccounts  MailAccount[]
-  writingStyle  UserWritingStyle?
-  settings      UserSettings?
-  scheduled     ScheduledEmail[]
-  reminders     FollowUpReminder[]
-  usage         AiUsage[]
-  threatAppeals ThreatAppeal[]
+  accounts          Account[]
+  sessions          Session[]
+  mailAccounts      MailAccount[]
+  writingStyle      UserWritingStyle?
+  settings          UserSettings?
+  scheduled         ScheduledEmail[]
+  reminders         FollowUpReminder[]
+  usage             AiUsage[]
+  threatAppeals     ThreatAppeal[]
+  mailAccountEvents MailAccountEvent[]
 }
 
 model Account {
@@ -98,6 +99,54 @@ enum SyncStatus {
 
 /// One row per connected mailbox. A user may connect several.
 /// Tokens are AES-256-GCM ciphertext — never plaintext, never sent to the client.
+enum MailAccountEventKind {
+  CONNECTED
+  RECONNECTED
+  DISCONNECTED
+}
+
+/// Audit trail for mailbox connect and disconnect.
+///
+/// It exists because a mailbox once vanished with no persisted record of what
+/// removed it: the only evidence was a log line on stdout, which is gone the moment
+/// the process is. A row survives the process, the restart and — critically — the
+/// mailbox itself.
+///
+/// **`mailAccountId` is deliberately a plain String with no foreign key.** A relation
+/// to `MailAccount` would cascade, so the disconnect record would be deleted by the
+/// very delete it exists to document. The cost of that choice is that the column can
+/// name a row that no longer exists, which for an audit trail is the point rather
+/// than a defect.
+///
+/// The `User` relation *does* cascade: a deleted user is account closure, and keeping
+/// their mailbox addresses after it would be keeping personal data with nobody left to
+/// show it to.
+model MailAccountEvent {
+  id     String               @id @default(cuid())
+  kind   MailAccountEventKind
+  userId String
+
+  /// The mailbox this happened to. Not a foreign key — see above.
+  mailAccountId String
+  provider      MailProviderType
+  /// Which mailbox, in the form a person would recognize.
+  emailAddress  String
+
+  /// Correlates the row with the API log line for the same request (lib/requestId.ts).
+  /// Null for anything that did not arrive as a request.
+  requestId String?
+
+  /// Disconnect only: whether the grant was actually revoked at the provider.
+  grantRevoked Boolean?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([mailAccountId])
+}
+
 model MailAccount {
   id           String           @id @default(cuid())
   userId       String

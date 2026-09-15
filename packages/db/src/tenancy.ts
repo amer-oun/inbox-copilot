@@ -23,6 +23,12 @@ const TENANCY: Readonly<Record<string, TenancyRule>> = {
   VerificationToken: { kind: "global" },
 
   MailAccount: { kind: "direct" },
+  /*
+   * Direct, not path-scoped through MailAccount — it has no relation to one, on
+   * purpose, so that a disconnect record outlives the mailbox it records (see the
+   * model's own comment). `userId` is what scopes it.
+   */
+  MailAccountEvent: { kind: "direct" },
   UserWritingStyle: { kind: "direct" },
   UserSettings: { kind: "direct" },
   AiUsage: { kind: "direct" },

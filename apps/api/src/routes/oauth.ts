@@ -6,6 +6,7 @@ import {
 import { env } from "../lib/env.js";
 import { logger } from "../lib/logger.js";
 import { consumeOAuthState, InvalidOAuthStateError } from "../lib/oauthState.js";
+import { requestIdOf } from "../lib/requestId.js";
 import { completeMailAccountConnect } from "../services/mailAccounts.js";
 
 /**
@@ -89,6 +90,7 @@ oauthRouter.get("/oauth/:provider/callback", async (req, res) => {
       userId,
       provider,
       code: query.data.code,
+      requestId: requestIdOf(req),
     });
     res.redirect(redirectToSettings({ ok: true, email: account.emailAddress }));
   } catch (error) {
