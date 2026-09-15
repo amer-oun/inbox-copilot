@@ -8,11 +8,17 @@ import { classifyMessage } from "./classify.js";
 import { summarizeThread } from "./summarize.js";
 import { loadAiSettings } from "./usage.js";
 import { MESSAGE_PROMPT_SELECT, type MessageForPrompt } from "./content.js";
+import {
+  assessMessageThreat,
+  refreshThreadThreatLevel,
+  THREAT_MESSAGE_SELECT,
+  type MessageForThreat,
+} from "../security/phishing.js";
 
 /**
- * The `ai.enrich` pipeline (§5): classify a new message, summarize its thread when
- * the thread is worth summarizing, and denormalize the result onto `Thread` for the
- * list view.
+ * The `ai.enrich` pipeline (§5, §6): classify a new message, assess it for phishing,
+ * summarize its thread when the thread is worth summarizing, and denormalize the
+ * result onto `Thread` for the list view.
  *
  * One message per job. That keeps a failure small (one message, not a mailbox), lets
  * the job id dedupe repeated enqueues of the same message, and means the daily cap is
@@ -32,6 +38,12 @@ export interface EnrichHooks {
 
 interface LoadedMessage {
   message: MessageForPrompt;
+  /**
+   * The same row, with the columns §6 reads. One read, two views: the threat layer
+   * needs the stored `authResults` and the attachment risk flags, which classification
+   * has no business seeing.
+   */
+  threatMessage: MessageForThreat;
   threadId: string;
   mailboxAddress: string;
 }
@@ -50,6 +62,7 @@ async function loadMessage(input: EnrichInput): Promise<LoadedMessage> {
     where: { id: input.messageId, mailAccountId: input.mailAccountId },
     select: {
       ...MESSAGE_PROMPT_SELECT,
+      ...THREAT_MESSAGE_SELECT,
       threadId: true,
       mailAccount: { select: { emailAddress: true } },
     },
@@ -60,6 +73,7 @@ async function loadMessage(input: EnrichInput): Promise<LoadedMessage> {
   const { threadId, mailAccount, ...message } = row;
   return {
     message: message as MessageForPrompt,
+    threatMessage: message as unknown as MessageForThreat,
     threadId,
     mailboxAddress: mailAccount.emailAddress,
   };
@@ -131,7 +145,7 @@ export async function runEnrich(
     return result;
   }
 
-  const { message, threadId, mailboxAddress } = await loadMessage(input);
+  const { message, threatMessage, threadId, mailboxAddress } = await loadMessage(input);
 
   try {
     if (settings.autoCategorize) {
@@ -149,8 +163,9 @@ export async function runEnrich(
 
       /*
        * Denormalized onto the thread only when this is its newest message (§5: fast
-       * list queries). `threatLevel` is not touched — phase 9 owns it, and a default
-       * of UNKNOWN is the honest value until the deterministic layers exist.
+       * list queries). `threatLevel` is not written here: it is a rollup of every
+       * message in the thread rather than a property of the newest one, and the threat
+       * stage below owns it (`refreshThreadThreatLevel`).
        */
       if (await isNewestInThread(input.userId, threadId, message.id)) {
         await dbForUser(input.userId).thread.update({
@@ -166,6 +181,51 @@ export async function runEnrich(
       }
     } else {
       result.skipped.push("categorize-off");
+    }
+
+    /*
+     * §6, after classification and before summarization.
+     *
+     * After, because the classification row has to exist before there is somewhere to
+     * put a threat verdict — and because a message the classifier has already read is a
+     * message whose body is warm in the cache. Before summarization, because a
+     * suspicious thread is worth flagging even if the summarizer then fails.
+     *
+     * A failure here is *not* allowed to fail the job. A message that could not be
+     * assessed keeps its honest UNKNOWN, and the sweep will pick it up again; losing
+     * the classification and the summary as well because a link parse threw would be a
+     * worse outcome than an unassessed message.
+     */
+    if (settings.phishingProtection) {
+      if (threatMessage.isOutbound) {
+        result.skipped.push("threat-outbound");
+      } else {
+        try {
+          const threat = await assessMessageThreat({
+            userId: input.userId,
+            mailAccountId: input.mailAccountId,
+            mailboxAddress,
+            message: threatMessage,
+            settings,
+            ...(hooks.signal ? { signal: hooks.signal } : {}),
+          });
+
+          result.threatLevel = threat.level;
+          if (threat.fromCache) result.skipped.push("threat-cache");
+          if (threat.skipped !== undefined) result.skipped.push(`threat-${threat.skipped}`);
+
+          // The thread carries the worst verdict among its messages, not the newest —
+          // see `refreshThreadThreatLevel`.
+          await refreshThreadThreatLevel(input.userId, threadId);
+        } catch (error) {
+          if (error instanceof AiCapExceededError || error instanceof AiDisabledError) throw error;
+          if (isAbortError(error)) throw error;
+          log.error({ err: error }, "threat assessment failed; message left unassessed");
+          result.skipped.push("threat-failed");
+        }
+      }
+    } else {
+      result.skipped.push("threat-off");
     }
 
     if (settings.autoSummarize) {
@@ -207,7 +267,12 @@ export async function runEnrich(
   }
 
   log.info(
-    { classified: result.classified, summarized: result.summarized, skipped: result.skipped },
+    {
+      classified: result.classified,
+      summarized: result.summarized,
+      threatLevel: result.threatLevel,
+      skipped: result.skipped,
+    },
     "message enriched",
   );
   return result;

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { cuidSchema, languageSchema, pageOf, paginationSchema } from "./common.js";
 import { aiActionItemSchema } from "./ai.js";
 import { categorySchema, prioritySchema, threatLevelSchema } from "./enums.js";
+import { threatAssessmentSchema } from "./threat.js";
 
 /**
  * Read contracts for the inbox (ARCHITECTURE §1: the browser sees these shapes,
@@ -132,6 +133,17 @@ export const threadDetailSchema = z.object({
    * themselves), which is how the UI knows not to offer a composer.
    */
   replyRecipients: z.array(addressSchema),
+  /**
+   * The most severe verdict among this thread's messages (§6), with the evidence
+   * behind it — or null when nothing in the thread has been assessed.
+   *
+   * One assessment rather than one per message, because the banner is one banner: the
+   * worst message in a thread is what a reader needs warning about, and it carries the
+   * `messageId` so the appeal control knows what it is appealing. `threatLevel` above
+   * stays as the thread's rollup for the list view, which needs a level and not a
+   * paragraph.
+   */
+  threat: threatAssessmentSchema.nullable(),
   /** Null when the thread was below the summarization threshold (§5). */
   summary: threadSummarySchema.nullable(),
   /** Oldest first — the order a person reads a conversation in. */

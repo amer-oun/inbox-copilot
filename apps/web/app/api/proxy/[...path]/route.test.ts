@@ -29,6 +29,7 @@ const { GET, POST } = await import("./route");
 const ORIGIN = "https://app.example.test";
 const USER_ID = "cldd4kzai000008l3a1b2c3d4";
 const THREAD_ID = "cldd4kzai000108l3a1b2c3d4";
+const MESSAGE_ID = "cldd4kzai000308l3a1b2c3d4";
 
 function params(path: string): { params: Promise<{ path: string[] }> } {
   return { params: Promise.resolve({ path: path.split("/") }) };
@@ -95,12 +96,13 @@ describe("reads", () => {
 });
 
 describe("writes", () => {
-  it("proxies drafting, sending, composing and the style rebuild", async () => {
+  it("proxies drafting, sending, composing, the style rebuild and a threat appeal", async () => {
     const paths = [
       `threads/${THREAD_ID}/replies`,
       `threads/${THREAD_ID}/reply`,
       "compose",
       "writing-style",
+      `messages/${MESSAGE_ID}/threat-appeal`,
     ];
 
     for (const path of paths) {
@@ -122,6 +124,24 @@ describe("writes", () => {
       method: "POST",
       body: { body: "Sending today.", draftId: "d_1" },
     });
+  });
+
+  it("does not proxy a path that would set a verdict", async () => {
+    /*
+     * The appeal is the only threat write the browser can reach, and this list is where
+     * that stays true. There is no API route behind these either — the point of asserting
+     * it here as well is that the BFF must not become the place a new one quietly appears.
+     */
+    for (const path of [
+      `messages/${MESSAGE_ID}/threat`,
+      `messages/${MESSAGE_ID}/threat-level`,
+      `threads/${THREAD_ID}/threat`,
+    ]) {
+      const response = await POST(post(path, { level: "SAFE" }), params(path));
+      expect(response.status).toBe(404);
+    }
+
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 
   it("refuses a cross-origin write", async () => {

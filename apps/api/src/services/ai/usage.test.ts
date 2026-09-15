@@ -35,6 +35,7 @@ const SETTINGS: AiSettings = {
   aiEnabled: true,
   autoSummarize: true,
   autoCategorize: true,
+  phishingProtection: true,
   dailyAiCallCap: 500,
   defaultTone: "PROFESSIONAL",
 };

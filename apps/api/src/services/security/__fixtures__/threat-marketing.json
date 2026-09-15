@@ -1,0 +1,27 @@
+{
+  "id": "msg_01ThreatMarketing00000001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01ThreatMarketing",
+      "name": "record_threat_assessment",
+      "input": {
+        "intent": "BENIGN_MARKETING",
+        "assessedLevel": "SAFE",
+        "confidence": 0.92,
+        "explanation": "This is ordinary marketing from a shop you have bought from before. The sender's domain checks out, the links go where they say they do, and nothing is asking you for a password or a payment detail. It is safe to ignore or to unsubscribe from."
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1420,
+    "output_tokens": 96,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

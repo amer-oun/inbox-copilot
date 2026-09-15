@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Reply, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Reply } from "lucide-react";
 import { threadDetailSchema } from "@inbox-copilot/shared";
 import { ApiError, apiFetch } from "../../../lib/apiClient";
 import { requireSession } from "../../../lib/session";
@@ -8,6 +8,7 @@ import { Badge } from "../../../components/ui/badge";
 import { SummaryCard } from "../../../components/thread/SummaryCard";
 import { MessageCard } from "../../../components/thread/MessageCard";
 import { ReplyComposer } from "../../../components/thread/ReplyComposer";
+import { ThreatBanner } from "../../../components/thread/ThreatBanner";
 
 /**
  * One thread: summary first, then the conversation oldest-first.
@@ -40,8 +41,6 @@ export default async function ThreadPage({ params }: ThreadPageProps) {
     if (error instanceof ApiError && error.status === 404) notFound();
     throw error;
   }
-
-  const suspicious = thread.threatLevel !== "UNKNOWN" && thread.threatLevel !== "SAFE";
 
   return (
     <main className="mx-auto min-h-dvh max-w-3xl px-4 pb-16 pt-6">
@@ -77,15 +76,15 @@ export default async function ThreadPage({ params }: ThreadPageProps) {
           {thread.language !== null && <span>{thread.language}</span>}
         </div>
 
-        {suspicious && (
-          <p
-            role="alert"
-            className="mt-3 flex items-start gap-2 rounded-card border border-danger/35 bg-danger/10 px-3 py-2 text-sm text-danger"
-          >
-            <ShieldAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            This thread is flagged as {thread.threatLevel.toLowerCase()}. Treat links and
-            attachments with suspicion.
-          </p>
+        {/*
+          The banner is a client component because of the appeal control, and it is
+          handed the whole assessment rather than a level: the reasons are the product
+          (§6), and a banner that only knew `threatLevel` could not show them.
+        */}
+        {thread.threat !== null && (
+          <div className="mt-3">
+            <ThreatBanner threat={thread.threat} />
+          </div>
         )}
 
         <p className="mt-3 truncate text-xs text-muted">

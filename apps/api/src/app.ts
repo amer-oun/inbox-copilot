@@ -7,6 +7,7 @@ import { oauthRouter } from "./routes/oauth.js";
 import { replyRouter } from "./routes/reply.js";
 import { webhooksRouter } from "./routes/webhooks.js";
 import { threadsRouter } from "./routes/threads.js";
+import { threatRouter } from "./routes/threat.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 
 export function createApp(): Express {
@@ -44,6 +45,7 @@ export function createApp(): Express {
   app.use(mailAccountsRouter);
   app.use(threadsRouter);
   app.use(replyRouter);
+  app.use(threatRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

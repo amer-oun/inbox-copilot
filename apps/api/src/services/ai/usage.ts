@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   aiEnabled: true,
   autoSummarize: true,
   autoCategorize: true,
+  phishingProtection: true,
   dailyAiCallCap: 500,
   defaultTone: "PROFESSIONAL",
 } as const;
@@ -25,6 +26,8 @@ export interface AiSettings {
   aiEnabled: boolean;
   autoSummarize: boolean;
   autoCategorize: boolean;
+  /** §6 layer 3. Off means no threat banner at all — including the free layers. */
+  phishingProtection: boolean;
   dailyAiCallCap: number;
   /** The tone a reply is drafted in when the caller does not name one. */
   defaultTone: ReplyTone;
@@ -37,6 +40,7 @@ export async function loadAiSettings(userId: string): Promise<AiSettings> {
       aiEnabled: true,
       autoSummarize: true,
       autoCategorize: true,
+      phishingProtection: true,
       dailyAiCallCap: true,
       defaultTone: true,
     },

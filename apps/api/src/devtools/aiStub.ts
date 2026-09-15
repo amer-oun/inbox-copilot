@@ -5,11 +5,13 @@ import {
   aiComposedMessageSchema,
   aiReplyVariantsSchema,
   aiSummarySchema,
+  aiThreatAssessmentSchema,
   aiWritingStyleSchema,
   type AiClassificationOutput,
   type AiComposedMessageOutput,
   type AiReplyVariantsOutput,
   type AiSummaryOutput,
+  type AiThreatAssessmentOutput,
   type AiWritingStyleOutput,
   type Category,
 } from "@inbox-copilot/shared";
@@ -403,6 +405,65 @@ export function stubWritingStyle(userContent: string): AiWritingStyleOutput {
   });
 }
 
+/**
+ * Reads back the deterministic findings block.
+ *
+ * This is the one thing the stubbed threat assessment is allowed to look at, and that
+ * is the whole design: the stub's verdict is a function of *our* signals, never of the
+ * email's prose. So a phishing body that pleads its innocence changes nothing here —
+ * which is the property the real defense assumes, and a dev tool used to demonstrate
+ * that defense must not quietly lack it.
+ */
+export function parseThreatSignals(userContent: string): Record<string, string> {
+  const block = /<threat_signals>\n([\s\S]*?)\n<\/threat_signals>/.exec(userContent);
+  const fields: Record<string, string> = {};
+  if (block === null) return fields;
+
+  for (const line of (block[1] ?? "").split("\n")) {
+    const separator = line.indexOf(": ");
+    if (separator === -1) continue;
+    const key = line.slice(0, separator);
+    if (!(key in fields)) fields[key] = line.slice(separator + 2);
+  }
+  return fields;
+}
+
+/**
+ * A deterministic threat assessment.
+ *
+ * It mirrors the floor it is given rather than second-guessing it, and says out loud
+ * that it is a stub. That makes a dev run exercise the interesting half — the union, the
+ * row, the banner, the appeal — while being obviously useless as a judgment, which is
+ * the correct trade for a component whose real job is reading prose.
+ *
+ * One deliberate behaviour: when the floor is SUSPICIOUS it returns SAFE. That is the
+ * §6 case worth having in front of you locally — the model disagreeing downward — and it
+ * means the banner you see in development is one the rules held up on their own.
+ */
+export function stubThreatAssessment(userContent: string): AiThreatAssessmentOutput {
+  const signals = parseThreatSignals(userContent);
+  const { metadata } = parsePrompt(userContent);
+
+  const floor = signals["deterministic_floor"] ?? "SAFE";
+  const score = Number(signals["deterministic_score"] ?? "0");
+  const automated = isAutomated(metadata);
+
+  const intent = floor === "SAFE"
+    ? automated
+      ? "BENIGN_TRANSACTIONAL"
+      : "BENIGN_PERSONAL"
+    : "UNCLEAR";
+
+  return aiThreatAssessmentSchema.parse({
+    intent,
+    // Always SAFE: see above. The union is what decides, and locally it should be
+    // visible that it decides against this value.
+    assessedLevel: "SAFE",
+    confidence: 0.3,
+    explanation: `[stubbed assessment] The development AI stub read no prose: this text is generated locally from the deterministic findings (score ${Number.isFinite(score) ? score : 0}, floor ${floor}), which are the real signal here. Treat the intent above as a placeholder, not a judgment.`,
+  });
+}
+
 interface MessagesRequest {
   model: string;
   system: string;
@@ -436,7 +497,9 @@ export function stubResponse(request: MessagesRequest): unknown {
           ? stubComposedMessage(userContent)
           : toolName === "record_writing_style"
             ? stubWritingStyle(userContent)
-            : stubClassification(userContent);
+            : toolName === "record_threat_assessment"
+              ? stubThreatAssessment(userContent)
+              : stubClassification(userContent);
 
   const promptChars = request.system.length + userContent.length;
   const outputChars = JSON.stringify(input).length;

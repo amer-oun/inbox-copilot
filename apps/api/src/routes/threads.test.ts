@@ -88,6 +88,9 @@ const DETAIL = {
   language: "en",
   threatLevel: "UNKNOWN" as const,
   replyRecipients: [{ name: "Dana", email: "dana@northwind.example" }],
+  // §6's assessment, absent here: this thread has not been assessed, and the route
+  // must pass that through as null rather than inventing a reassuring verdict.
+  threat: null,
   summary: null,
   messages: [
     {

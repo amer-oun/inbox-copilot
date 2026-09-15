@@ -392,6 +392,93 @@ describe("getThread", () => {
     expect(thread.messages[0]?.blockedRemoteImages).toBe(0);
   });
 
+  it("returns no assessment for a thread nothing has assessed", async () => {
+    // Null rather than an all-clear: the UI must be able to tell "we have not looked" from
+    // "we looked and it was fine".
+    threadFindFirst.mockResolvedValue(detailRow());
+
+    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+
+    expect(thread.threat).toBeNull();
+  });
+
+  it("carries the threat evidence, not just the level", async () => {
+    /*
+     * §6's product requirement reaching the wire: a score teaches a reader nothing, and the
+     * reason list is what they can carry to the next inbox. The rule score travels
+     * separately from the final one so the UI can show where the model raised the verdict.
+     */
+    const base = detailRow();
+    threadFindFirst.mockResolvedValue({
+      ...base,
+      threatLevel: "PHISHING",
+      messages: [
+        {
+          ...base.messages[0],
+          classification: {
+            threatLevel: "PHISHING",
+            threatScore: 85,
+            threatReasons: [
+              "DMARC failed: northwind.example says this did not come from them.",
+              "A link that reads northwind.example actually goes to evil.test.",
+            ],
+            ruleSignals: { version: 1, score: 75, floor: "SUSPICIOUS" },
+            threatIntent: "INVOICE_FRAUD",
+            threatExplanation: "The bank details differ from the ones on your earlier invoices.",
+            threatModel: "claude-opus-5",
+          },
+          threatAppeal: null,
+        },
+      ],
+    });
+
+    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+
+    expect(thread.threat).toMatchObject({
+      messageId: "cm00000000000000000000010",
+      level: "PHISHING",
+      score: 85,
+      intent: "INVOICE_FRAUD",
+      ruleScore: 75,
+      ruleFloor: "SUSPICIOUS",
+      appeal: null,
+    });
+    expect(thread.threat?.reasons).toHaveLength(2);
+  });
+
+  it("reports an appeal without changing the verdict it disagrees with", async () => {
+    const base = detailRow();
+    threadFindFirst.mockResolvedValue({
+      ...base,
+      messages: [
+        {
+          ...base.messages[0],
+          classification: {
+            threatLevel: "SUSPICIOUS",
+            threatScore: 57,
+            threatReasons: ["No DMARC result."],
+            ruleSignals: { version: 1, score: 57, floor: "SUSPICIOUS" },
+            threatIntent: "BENIGN_TRANSACTIONAL",
+            threatExplanation: "Reads like a normal receipt.",
+            threatModel: "claude-sonnet-5",
+          },
+          threatAppeal: {
+            createdAt: new Date("2026-09-15T10:00:00Z"),
+            note: null,
+            claimedLevel: "SUSPICIOUS",
+            claimedScore: 57,
+          },
+        },
+      ],
+    });
+
+    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+
+    // The verdict stands in the data; the banner is what stands down.
+    expect(thread.threat?.level).toBe("SUSPICIOUS");
+    expect(thread.threat?.appeal?.claimedLevel).toBe("SUSPICIOUS");
+  });
+
   it("tells the UI who a reply would go to", async () => {
     threadFindFirst.mockResolvedValue(detailRow());
     const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });

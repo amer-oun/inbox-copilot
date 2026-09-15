@@ -1,4 +1,4 @@
-import type { MailProviderType } from "@inbox-copilot/shared";
+import type { AuthVerdict, MailProviderType } from "@inbox-copilot/shared";
 
 /**
  * The provider port (ARCHITECTURE §3). Every feature codes against this; adding a
@@ -25,18 +25,15 @@ export interface RawAddress {
 /**
  * SPF/DKIM/DMARC verdicts parsed out of `Authentication-Results`.
  *
- * Phase 9 decides what to do with these; phase 2 only has to record them
- * faithfully, including "the header did not say", which is `null` rather than a
- * guess — absence of a pass is not a fail.
+ * Phase 2 records them faithfully, including "the header did not say", which is
+ * `null` rather than a guess — absence of a pass is not a fail. Phase 9 scores them
+ * (`services/security/headers.ts`).
+ *
+ * Re-exported from `shared` rather than declared here: the same union is the wire
+ * contract for the stored `authResults` JSON, and two copies of it could drift into
+ * a verdict the reader silently drops as unrecognized.
  */
-export type AuthVerdict =
-  | "pass"
-  | "fail"
-  | "softfail"
-  | "neutral"
-  | "none"
-  | "temperror"
-  | "permerror";
+export type { AuthVerdict };
 
 export interface RawAuthResults {
   spf: AuthVerdict | null;

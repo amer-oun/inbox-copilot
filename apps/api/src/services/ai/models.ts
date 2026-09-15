@@ -28,6 +28,18 @@ export const FEATURE_MODELS = {
   // Style profiling runs once per mailbox, over ~30 messages, and its output is
   // injected into every reply the user ever sees — the one call worth not saving on.
   style: MODELS.standard,
+  /*
+   * Threat assessment, in two tiers (§6 layer 3).
+   *
+   * `threat` runs on every inbound message that the deterministic layers did not
+   * already condemn, so it has to be affordable. `threatDeep` is the escalation §5
+   * reserves the deep tier for: when layer 1 or 2 has found hard evidence, the
+   * remaining question — is this a targeted attack on this person, and what do we tell
+   * them — is worth the better reader. Both are separate ledger labels, so the cost of
+   * escalating is visible rather than buried in one "phishing" total.
+   */
+  threat: MODELS.standard,
+  threatDeep: MODELS.deep,
 } as const satisfies Record<string, ModelId>;
 
 export type AiFeature = keyof typeof FEATURE_MODELS;
@@ -48,6 +60,14 @@ export const MAX_OUTPUT_TOKENS = {
   reply: 3_072,
   compose: 1_536,
   style: 1_024,
+  /*
+   * An intent, a level, a confidence and at most 600 characters of explanation. The
+   * ceiling is deliberately tight: a threat assessment that needs a thousand tokens to
+   * state itself is reasoning in the output rather than judging, and the user is not
+   * going to read it either.
+   */
+  threat: 768,
+  threatDeep: 768,
 } as const satisfies Record<AiFeature, number>;
 
 /**

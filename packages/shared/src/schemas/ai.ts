@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { categorySchema, prioritySchema } from "./enums.js";
+import { categorySchema, prioritySchema, threatLevelSchema } from "./enums.js";
 
 /**
  * The structured outputs of the AI layer (§5).
@@ -88,6 +88,12 @@ export const aiEnrichResultSchema = z.object({
   messageId: z.string(),
   classified: z.boolean(),
   summarized: z.boolean(),
+  /**
+   * The verdict §6's layers reached, when they ran. Omitted rather than UNKNOWN when
+   * they did not: "we did not look" and "we looked and found nothing" are different
+   * outcomes, and the `skipped` list says which.
+   */
+  threatLevel: threatLevelSchema.optional(),
   /** Set when work was skipped rather than done: "cache" | "cap" | "disabled". */
   skipped: z.array(z.string()),
 });

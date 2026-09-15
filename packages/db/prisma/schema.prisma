@@ -37,6 +37,7 @@ model User {
   scheduled     ScheduledEmail[]
   reminders     FollowUpReminder[]
   usage         AiUsage[]
+  threatAppeals ThreatAppeal[]
 }
 
 model Account {
@@ -107,21 +108,21 @@ model MailAccount {
   // Encrypted token vault. Each ciphertext gets its own iv + authTag — a GCM
   // nonce must never be reused across two encryptions under the same key.
   // `keyVersion` covers both and exists so the key can be rotated.
-  accessTokenEnc     String?   @db.Text
-  accessTokenIv      String?
-  accessTokenAuthTag String?
-  refreshTokenEnc    String?   @db.Text
-  refreshTokenIv     String?
+  accessTokenEnc      String?   @db.Text
+  accessTokenIv       String?
+  accessTokenAuthTag  String?
+  refreshTokenEnc     String?   @db.Text
+  refreshTokenIv      String?
   refreshTokenAuthTag String?
-  keyVersion         Int       @default(1)
-  tokenExpiresAt     DateTime?
-  tokenRefreshedAt   DateTime?
-  scopes             String[]
+  keyVersion          Int       @default(1)
+  tokenExpiresAt      DateTime?
+  tokenRefreshedAt    DateTime?
+  scopes              String[]
 
   // sync cursors — Gmail uses historyId, Graph uses a deltaLink URL
-  syncCursor      String?   @db.Text
+  syncCursor      String?    @db.Text
   syncStatus      SyncStatus @default(PENDING)
-  syncError       String?   @db.Text
+  syncError       String?    @db.Text
   lastSyncedAt    DateTime?
   backfilledUntil DateTime?
 
@@ -130,18 +131,18 @@ model MailAccount {
   /// the history pointer captured when the run began — a resume must keep the
   /// original, because re-reading it later would skip everything that arrived
   /// during the attempt that failed. Both are cleared when the backfill completes.
-  backfillPageToken String?  @db.Text
+  backfillPageToken String? @db.Text
   backfillCursor    String?
 
   // push notification subscription
-  watchResourceId String?
-  watchExpiresAt  DateTime?
+  watchResourceId  String?
+  watchExpiresAt   DateTime?
   watchClientState String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   threads   Thread[]
   messages  Message[]
   scheduled ScheduledEmail[]
@@ -177,8 +178,8 @@ enum Priority {
 }
 
 model Thread {
-  id             String @id @default(cuid())
-  mailAccountId  String
+  id               String @id @default(cuid())
+  mailAccountId    String
   providerThreadId String
 
   subject        String?  @db.Text
@@ -194,9 +195,9 @@ model Thread {
   isTrashed  Boolean @default(false)
 
   // AI-derived, denormalized onto the thread for fast list queries
-  category      Category? 
+  category      Category?
   priority      Priority?
-  priorityScore Int?      // 0-100
+  priorityScore Int? // 0-100
   threatLevel   ThreatLevel @default(UNKNOWN)
   needsReply    Boolean     @default(false)
   language      String?
@@ -206,12 +207,12 @@ model Thread {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  mailAccount    MailAccount        @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
-  messages       Message[]
-  summaries      AiSummary[]
-  replyDrafts    ReplyDraft[]
-  reminders      FollowUpReminder[]
-  scheduled      ScheduledEmail[]
+  mailAccount MailAccount        @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
+  messages    Message[]
+  summaries   AiSummary[]
+  replyDrafts ReplyDraft[]
+  reminders   FollowUpReminder[]
+  scheduled   ScheduledEmail[]
 
   @@unique([mailAccountId, providerThreadId])
   @@index([mailAccountId, lastMessageAt(sort: Desc)])
@@ -220,7 +221,7 @@ model Thread {
 }
 
 model Message {
-  id                String @id @default(cuid())
+  id                String  @id @default(cuid())
   threadId          String
   mailAccountId     String
   providerMessageId String
@@ -252,11 +253,12 @@ model Message {
 
   createdAt DateTime @default(now())
 
-  thread          Thread             @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  mailAccount     MailAccount        @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
-  attachments     Attachment[]
-  classification  AiClassification?
-  translations    Translation[]
+  thread         Thread            @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  mailAccount    MailAccount       @relation(fields: [mailAccountId], references: [id], onDelete: Cascade)
+  attachments    Attachment[]
+  classification AiClassification?
+  translations   Translation[]
+  threatAppeal   ThreatAppeal?
 
   @@unique([mailAccountId, providerMessageId])
   @@index([threadId, sentAt])
@@ -265,14 +267,14 @@ model Message {
 }
 
 model Attachment {
-  id                 String  @id @default(cuid())
-  messageId          String
+  id                   String  @id @default(cuid())
+  messageId            String
   providerAttachmentId String?
-  filename           String
-  mimeType           String
-  sizeBytes          Int
-  isInline           Boolean @default(false)
-  riskFlag           String? // "executable" | "macro" | "archive" | null
+  filename             String
+  mimeType             String
+  sizeBytes            Int
+  isInline             Boolean @default(false)
+  riskFlag             String? // "executable" | "macro" | "archive" | null
 
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
@@ -286,12 +288,12 @@ model Attachment {
 model AiSummary {
   id          String   @id @default(cuid())
   threadId    String
-  contentHash String   // hash of the concatenated thread at summarization time
+  contentHash String // hash of the concatenated thread at summarization time
   model       String
   headline    String   @db.Text
   summary     String   @db.Text
-  keyPoints   Json     // string[]
-  actionItems Json     // [{ text, owner, dueDate? }]
+  keyPoints   Json // string[]
+  actionItems Json // [{ text, owner, dueDate? }]
   createdAt   DateTime @default(now())
 
   thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
@@ -320,9 +322,19 @@ model AiClassification {
   confidence    Float
 
   threatLevel   ThreatLevel
-  threatScore   Int    // 0-100
-  threatReasons Json   // string[] shown to the user
-  ruleSignals   Json   // deterministic layer-1/2 findings, pre-LLM
+  threatScore   Int // 0-100
+  threatReasons Json // string[] shown to the user
+  ruleSignals   Json // deterministic layer-1/2 findings, pre-LLM
+
+  /// Layer 3: what the model judged the sender was trying to do, and how it
+  /// explained that to the user. Null until the message has been assessed, or when
+  /// the rules ran alone (AI off, or the daily cap spent) — the deterministic
+  /// layers do not need the model to produce a verdict.
+  threatIntent      String?
+  threatExplanation String? @db.Text
+  /// The model that produced the interpretation, which is not the model in
+  /// `model` below: classification runs on Haiku and threat assessment does not.
+  threatModel       String?
 
   model       String
   contentHash String
@@ -331,6 +343,33 @@ model AiClassification {
   message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@index([contentHash])
+}
+
+/// A user disagreeing with a threat verdict — the appeal path §6 asks for.
+///
+/// Recorded *beside* the verdict rather than overwriting it: the rules and the
+/// model said what they said, and an assessment that quietly rewrites itself when
+/// somebody clicks "safe" leaves nothing to measure a false-positive rate against.
+/// The UI reads this to stand the banner down; the scoring never reads it.
+model ThreatAppeal {
+  id        String @id @default(cuid())
+  userId    String
+  messageId String @unique
+
+  /// The verdict as it stood when the user disagreed with it.
+  claimedLevel ThreatLevel
+  claimedScore Int
+  /// The reasons shown to them at that moment, so the appeal can be read back
+  /// against what they were actually told.
+  shownReasons Json
+  note         String?     @db.Text
+
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 enum ReplyTone {
@@ -343,14 +382,14 @@ enum ReplyTone {
 }
 
 model ReplyDraft {
-  id        String    @id @default(cuid())
-  threadId  String
-  tone      ReplyTone
-  body      String    @db.Text
-  editedBody String?  @db.Text
-  wasUsed   Boolean   @default(false) // feedback signal for prompt tuning
-  model     String
-  createdAt DateTime  @default(now())
+  id         String    @id @default(cuid())
+  threadId   String
+  tone       ReplyTone
+  body       String    @db.Text
+  editedBody String?   @db.Text
+  wasUsed    Boolean   @default(false) // feedback signal for prompt tuning
+  model      String
+  createdAt  DateTime  @default(now())
 
   thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
@@ -418,17 +457,17 @@ enum ScheduleStatus {
 }
 
 model ScheduledEmail {
-  id            String @id @default(cuid())
+  id            String  @id @default(cuid())
   userId        String
   mailAccountId String
   threadId      String?
 
-  to      String[]
-  cc      String[]
-  bcc     String[]
-  subject String   @db.Text
-  bodyHtml String  @db.Text
-  bodyText String? @db.Text
+  to       String[]
+  cc       String[]
+  bcc      String[]
+  subject  String   @db.Text
+  bodyHtml String   @db.Text
+  bodyText String?  @db.Text
 
   sendAt   DateTime
   timezone String
@@ -485,15 +524,15 @@ model UserSettings {
   id     String @id @default(cuid())
   userId String @unique
 
-  aiEnabled          Boolean @default(true)
-  autoSummarize      Boolean @default(true)
-  autoCategorize     Boolean @default(true)
-  phishingProtection Boolean @default(true)
+  aiEnabled          Boolean   @default(true)
+  autoSummarize      Boolean   @default(true)
+  autoCategorize     Boolean   @default(true)
+  phishingProtection Boolean   @default(true)
   defaultTone        ReplyTone @default(PROFESSIONAL)
   translationLang    String?
-  followUpDays       Int     @default(3)
-  dailyAiCallCap     Int     @default(500)
-  storeFullBodies    Boolean @default(true)
+  followUpDays       Int       @default(3)
+  dailyAiCallCap     Int       @default(500)
+  storeFullBodies    Boolean   @default(true)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

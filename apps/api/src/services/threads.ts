@@ -10,6 +10,7 @@ import {
 } from "@inbox-copilot/shared";
 import { BadRequestError, NotFoundError } from "../lib/errors.js";
 import { sanitizeEmailHtml } from "./security/sanitize.js";
+import { threatAssessmentFor, THREAT_READ_SELECT } from "./security/read.js";
 import { replyRecipients, type ReplyTarget } from "./send.js";
 
 /**
@@ -253,6 +254,7 @@ export async function getThread(input: {
           isOutbound: true,
           bodyText: true,
           bodyHtml: true,
+          ...THREAT_READ_SELECT,
           attachments: {
             select: {
               id: true,
@@ -304,6 +306,7 @@ export async function getThread(input: {
 
   return threadDetailSchema.parse({
     replyRecipients: replyTargetsFor(row.messages, row.mailAccount.emailAddress),
+    threat: threatAssessmentFor(row.messages),
     id: row.id,
     subject: row.subject,
     participants: parseParticipants(row.participants),

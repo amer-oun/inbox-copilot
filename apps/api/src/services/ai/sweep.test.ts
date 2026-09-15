@@ -36,6 +36,7 @@ vi.mock("./enrich.js", () => ({ enqueueEnrichment }));
 
 const {
   findThreadsMissingSummaries,
+  findUnassessedMessages,
   findUnenrichedMessages,
   sweepAllEnrichment,
   sweepUserEnrichment,
@@ -61,6 +62,7 @@ beforeEach(() => {
     aiEnabled: true,
     autoSummarize: true,
     autoCategorize: true,
+    phishingProtection: true,
     dailyAiCallCap: 500,
   });
   mailAccountFindMany.mockReset().mockResolvedValue([{ userId: USER_ID }]);
@@ -94,6 +96,77 @@ describe("findUnenrichedMessages", () => {
   it("reads through the tenancy client", async () => {
     await findUnenrichedMessages({ userId: USER_ID });
     expect(tenantCalls).toContain(USER_ID);
+  });
+});
+
+describe("findUnassessedMessages", () => {
+  it("asks for classified messages whose threat level is still UNKNOWN", async () => {
+    /*
+     * The normal state of an existing install: every message classified before this phase
+     * has a row with the UNKNOWN that `classify.ts` honestly wrote. Those rows exist, so
+     * the "no classification" query steps straight past them.
+     */
+    await findUnassessedMessages({ userId: USER_ID });
+
+    expect(messageFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { isOutbound: false, classification: { is: { threatLevel: "UNKNOWN" } } },
+        orderBy: { sentAt: "desc" },
+        take: SWEEP_USER_LIMIT,
+      }),
+    );
+  });
+
+  it("excludes the user's own sent mail", async () => {
+    // The threat layer skips outbound mail, so including it here would hand the sweep a
+    // supply of work it can never finish.
+    await findUnassessedMessages({ userId: USER_ID });
+    expect(messageFindMany.mock.calls[0]?.[0].where.isOutbound).toBe(false);
+  });
+
+  it("reads through the tenancy client", async () => {
+    await findUnassessedMessages({ userId: USER_ID });
+    expect(tenantCalls).toContain(USER_ID);
+  });
+});
+
+describe("sweeping messages that were never assessed", () => {
+  it("queues them with whatever budget the other two gaps left", async () => {
+    // Unclassified first, then missing summaries, then unassessed: the third gap is the
+    // largest on an existing install, and letting it consume the whole budget would starve
+    // the other two for days.
+    messageFindMany
+      .mockResolvedValueOnce([]) // nothing unclassified
+      .mockResolvedValueOnce(messages(2)); // two unassessed
+    queryRaw.mockResolvedValue([]);
+
+    const result = await sweepUserEnrichment({ userId: USER_ID, limit: 10 });
+
+    expect(result).toMatchObject({ found: 2, queued: 2 });
+    expect(messageFindMany.mock.calls[1]?.[0].where.classification).toEqual({
+      is: { threatLevel: "UNKNOWN" },
+    });
+  });
+
+  it("does not queue a message twice for two different gaps", async () => {
+    // A message that is both unclassified and unassessed is one job: enrichment does both
+    // halves, and the second read is a cache hit.
+    messageFindMany.mockResolvedValue(messages(3));
+    queryRaw.mockResolvedValue([]);
+
+    const result = await sweepUserEnrichment({ userId: USER_ID });
+
+    expect(result).toMatchObject({ found: 3, queued: 3 });
+  });
+
+  it("does not look for unassessed messages once the budget is spent", async () => {
+    messageFindMany.mockResolvedValueOnce(messages(5));
+    queryRaw.mockResolvedValue([]);
+
+    await sweepUserEnrichment({ userId: USER_ID, limit: 5 });
+
+    // One call only: the limit was filled by unclassified messages.
+    expect(messageFindMany).toHaveBeenCalledTimes(1);
   });
 });
 

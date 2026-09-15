@@ -35,6 +35,10 @@ const TENANCY: Readonly<Record<string, TenancyRule>> = {
   AiSummary: { kind: "path", path: ["thread", "mailAccount"] },
   ReplyDraft: { kind: "path", path: ["thread", "mailAccount"] },
   AiClassification: { kind: "path", path: ["message", "mailAccount"] },
+  // Direct rather than path-scoped through Message, even though it has both: the
+  // appeal is a statement *by a user*, and stamping `userId` on create is what
+  // makes "who said this was safe" a fact the row cannot be born without.
+  ThreatAppeal: { kind: "direct" },
   Translation: { kind: "path", path: ["message", "mailAccount"] },
 };
 

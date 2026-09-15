@@ -21,12 +21,19 @@ import { checkDailyCap, loadAiSettings } from "./usage.js";
  * The sweep is also the tool for enriching a mailbox that synced before the AI layer
  * existed: `pnpm ai:sweep` on a freshly backfilled account classifies all of it.
  *
- * Enrichment is two calls, though, and the cap can fall between them: a message whose
+ * Enrichment is three calls, though, and the cap can fall between them: a message whose
  * classification succeeded and whose thread summary was refused looks complete to a
- * query about classifications. So the sweep looks for both halves — messages with no
- * classification, and threads over the summary threshold with no summary — or a capped
- * run would leave threads permanently unsummarized. A message queued for the second
- * reason costs no classification call: that is a cache hit.
+ * query about classifications. So the sweep looks for all three gaps — messages with no
+ * classification, threads over the summary threshold with no summary, and messages that
+ * were classified but never assessed for phishing — or a capped run would leave threads
+ * permanently unsummarized and mail permanently unassessed. A message queued for any of
+ * the later reasons costs no classification call: that is a cache hit.
+ *
+ * The third gap is not hypothetical, it is the normal state of an existing install:
+ * every message classified before this phase has a row whose `threatLevel` is the
+ * UNKNOWN that `classify.ts` honestly wrote. Those rows exist, so the "no
+ * classification" query steps straight past them, and without this finder a mailbox
+ * would only ever be assessed from the day it next received mail.
  */
 
 /** Per-user ceiling for one sweep, so a big mailbox cannot flood the queue. */
@@ -116,6 +123,35 @@ export async function findThreadsMissingSummaries(input: {
   `;
 }
 
+/**
+ * Messages that have a classification but no threat verdict, newest first.
+ *
+ * `threatLevel: "UNKNOWN"` is the marker, and it is a deliberate one: `classify.ts`
+ * writes it rather than SAFE precisely so that "not assessed" stays distinguishable
+ * from "assessed and found clean" — which is what makes this query possible at all.
+ *
+ * Outbound mail is excluded, because the threat layer skips it: including it here would
+ * hand the sweep a supply of work it can never finish.
+ */
+export async function findUnassessedMessages(input: {
+  userId: string;
+  mailAccountId?: string;
+  limit?: number;
+}): Promise<UnenrichedMessage[]> {
+  const rows = await dbForUser(input.userId).message.findMany({
+    where: {
+      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      isOutbound: false,
+      classification: { is: { threatLevel: "UNKNOWN" } },
+    },
+    orderBy: { sentAt: "desc" },
+    take: input.limit ?? SWEEP_USER_LIMIT,
+    select: { id: true, mailAccountId: true },
+  });
+
+  return rows as UnenrichedMessage[];
+}
+
 export interface SweepResult {
   userId: string;
   found: number;
@@ -186,10 +222,29 @@ export async function sweepUserEnrichment(input: {
         });
 
   const seen = new Set(unclassified.map((message) => message.id));
-  const messages = [
-    ...unclassified,
-    ...missingSummaries.filter((message) => !seen.has(message.id)),
-  ];
+  const summaryWork = missingSummaries.filter((message) => !seen.has(message.id));
+  for (const message of summaryWork) seen.add(message.id);
+
+  /*
+   * Unassessed messages come last, and only with what is left. Not because they matter
+   * least — a forged invoice nobody flagged matters a great deal — but because this
+   * gap is the largest by far on an existing install (every message that predates the
+   * phase), and letting it consume the whole budget would starve the other two for
+   * days. It drains over successive sweeps instead.
+   */
+  const afterSummaries = Math.max(0, remaining - summaryWork.length);
+  const unassessed =
+    afterSummaries === 0
+      ? []
+      : (
+          await findUnassessedMessages({
+            userId: input.userId,
+            ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+            limit: afterSummaries,
+          })
+        ).filter((message) => !seen.has(message.id));
+
+  const messages = [...unclassified, ...summaryWork, ...unassessed];
 
   if (messages.length === 0) {
     return { userId: input.userId, found: 0, queued: 0, budget };
@@ -216,7 +271,8 @@ export async function sweepUserEnrichment(input: {
     {
       found: messages.length,
       unclassified: unclassified.length,
-      missingSummaries: messages.length - unclassified.length,
+      missingSummaries: summaryWork.length,
+      unassessed: unassessed.length,
       queued,
       budget,
       mailboxes: byMailbox.size,

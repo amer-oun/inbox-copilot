@@ -42,6 +42,7 @@ const ALLOWED_POST_PATHS: RegExp[] = [
   /^threads\/c[a-z0-9]{24}\/reply$/, // send the text the user submitted
   /^compose$/, // draft a new message
   /^writing-style$/, // rebuild the style profile
+  /^messages\/c[a-z0-9]{24}\/threat-appeal$/, // "this is safe" — records, changes no verdict
 ];
 
 /** Query parameters that may be forwarded. Anything else is dropped. */

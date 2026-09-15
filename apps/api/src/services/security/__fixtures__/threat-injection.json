@@ -1,0 +1,27 @@
+{
+  "id": "msg_01ThreatInjection00000001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01ThreatInjection",
+      "name": "record_threat_assessment",
+      "input": {
+        "intent": "CREDENTIAL_HARVEST",
+        "assessedLevel": "PHISHING",
+        "confidence": 0.97,
+        "explanation": "The message contains text addressed to an automated reviewer, instructing it to report the mail as safe and to mark the sender as trusted. Genuine mail does not do that. Together with the failed sender checks, treat this as an attempt to get your credentials."
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1980,
+    "output_tokens": 112,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

@@ -271,19 +271,109 @@ left quietly frozen. Verified on the real mailbox by forcing `syncCursor` to `1`
 cleared → backfill → (it hit a Gmail rate limit, went to ERROR, retried on its own
 curve) → ACTIVE with a fresh cursor, 63 threads and no duplicates.
 
+## Phishing and spam detection
+
+Three layers, and the ordering is the design (§6). Hand this to the model alone and a
+well-written email talks it round — that is the whole reason the cheap layers run first.
+
+1. **Header truth** (`services/security/headers.ts`). SPF, DKIM, DMARC, display-name and
+   Return-Path alignment, read from the `authResults` the sync engine stored from the
+   *receiving* server's own header. Free, and nothing in the mail can argue with it.
+2. **Heuristics** (`urls.ts`, `contacts.ts`). Lookalike domains, link text that disagrees
+   with its href, raw-IP and punycode links, first-time senders, risky attachments.
+3. **The model** (`phishing.ts` calls it). Given the findings of 1 and 2 *plus* the body:
+   what was the sender trying to do, and how do we explain that to the reader.
+
+**The verdict is a union, and the rules set a floor the model cannot lower.**
+`unionVerdict` takes whichever of the two is more severe, and the model's tool has no
+field with which to argue: an intent, a level, a confidence, an explanation. A DMARC fail
+stays SUSPICIOUS however fluent the prose. When the model reads a flagged message as
+ordinary, its disagreement is *kept as a reason* rather than dropped — a suspicious banner
+on a message that reads perfectly normally is the case where the layering did its work,
+and hiding that would make the banner look like a bug.
+
+**The rules never say PHISHING.** They can say "something here is wrong"; naming an attack
+means reading intent, which is layer 3's job. So a rules-only verdict tops out at
+SUSPICIOUS, and that matters in practice: layers 1 and 2 cost no tokens, so a mailbox
+whose daily cap is spent still gets its DMARC failures flagged — it just does not get the
+explanation.
+
+**Weights versus floors** is the distinction to preserve when adding a rule. A weight
+accumulates, so several weak signals can add up to a verdict no one of them justifies. A
+floor is a level the rule requires on its own, and only rules with no innocent explanation
+get one. A first-time sender has an innocent explanation — everyone you know was once a
+first-time sender — so it is weight 8 and no floor, and a legitimate newsletter's first
+message comes out SAFE. Get this wrong and the banner becomes wallpaper, which is a worse
+failure than missing a rule.
+
+Two false positives are guarded deliberately, because either would flag ordinary mail
+daily: SPF and DKIM are **not** scored when DMARC itself passed (DMARC passes only when one
+of them passes *and* aligns, so `spf=fail, dmarc=pass` is ordinary forwarded mail), and
+every alignment and link comparison is made on the **registrable domain**, so
+`links.example.com` in an href under text reading `example.com` is click tracking rather
+than a lie.
+
+**A missing verdict is still not a pass** (the phase-2 rule, now with consequences). A
+null DMARC result scores 12 and is reported as "the receiving server could not confirm
+this"; it never scores as though the check passed, and the prompt writes it out as "not
+stated" rather than omitting the line.
+
+**The reference set for lookalikes is the user's own history** (`contacts.ts`): domains
+they have sent mail to, plus domains that have written to them at least three times, plus
+their own mailbox domain. A global brand list would be the wrong set — `paypa1.com` matters
+to everyone, but a lookalike of *your* freight forwarder is what a targeted attack uses.
+One inbound message never admits a domain, or the phishing mail under examination would
+vouch for itself.
+
+Assessment runs in the enrichment pipeline, after classification and before summarization,
+on inbound mail only — a threat banner on the user's own sent words would be absurd. It is
+gated on `UserSettings.phishingProtection`. A failure there never fails the job: the
+message keeps its honest UNKNOWN and `pnpm ai:sweep` finds it again, which is also how
+every message that predates this phase gets assessed (`findUnassessedMessages` looks for
+`threatLevel: UNKNOWN`, which is exactly why `classify.ts` writes UNKNOWN rather than SAFE).
+
+`Thread.threatLevel` is a **rollup of every message**, not of the newest one
+(`refreshThreadThreatLevel`): a benign follow-up must not clear the banner on the forged
+message above it.
+
+### The appeal path
+
+"This is safe" writes a `ThreatAppeal` row and **changes no verdict**. Rewriting
+`threatLevel` on a click would destroy the only record of a false positive, and a
+false-positive rate nobody can measure is a detector nobody can improve. The UI reads the
+appeal to stand the banner down to a note; the scoring never reads it, and the note never
+reaches a prompt — an attacker who can get a user to click "safe" once must not thereby
+influence how their next message is assessed.
+
+### Watch out: the tenancy extension merges with a spread
+
+`where: { ...existing, ...tenantFilter(rule, userId) }`. For a path-scoped model that
+predicate is keyed on the relation — `message` for `AiClassification` — so a top-level
+`where: { message: { threadId } }` is **overwritten** and the query silently widens to
+every row the user owns. That happened here: the thread rollup returned the worst verdict
+in the whole mailbox and stamped it on every thread. Put such a filter under `AND`, where
+both predicates survive. The mocked tests could not see it — a mocked `dbForUser` has no
+extension — which is the argument for the live probe.
+
 ## Current phase
-> Phase 7 — Real-time sync: DONE for Gmail. `startWatch`/`stopWatch` in
-> `GmailProvider`, `POST /webhooks/gmail` (`routes/webhooks.ts` + `lib/pubsub.ts`),
-> `services/deltaSync.ts` (the `sync.delta` job), `services/watch.ts` (the hourly
-> `sync.watch` keeper), and the Google Cloud setup in `docs/gmail-push-setup.md`.
-> Read "Real-time sync (Gmail push)" and "When sync goes quiet" above before touching
-> any of it.
-> Verified live end to end against the real mailbox with the development token: five
-> pushes collapsed into one delta, 6 changes read from the stored cursor, 4 threads and
-> 6 messages written, 0 enriched (all outbound), cursor advanced only afterwards. The
-> expired-cursor fallback was verified by forcing a stale cursor. Not yet verified: a
-> genuine Pub/Sub delivery, which needs the Google Cloud setup and a public URL.
-> Next: Phase 8 — Outlook. The `MailProvider` port is the seam; Graph subscriptions
-> replace Gmail watches and `deltaLink` replaces the history id, behind the same
-> interface.
+> Phase 9 — Phishing and spam detection: DONE. `services/security/headers.ts` (layer 1),
+> `urls.ts` + `contacts.ts` (layer 2), `phishing.ts` (the rule table, the union, the model
+> call), `read.ts` and `appeals.ts` for the UI, `routes/threat.ts`, and
+> `components/thread/ThreatBanner.tsx`. Read "Phishing and spam detection" above before
+> touching any of it, especially "weights versus floors".
+> Migration `20260915010000_threat_assessment_and_appeals` adds `threatIntent`,
+> `threatExplanation`, `threatModel` to `AiClassification` and the `ThreatAppeal` table.
+> Applied locally with `prisma migrate deploy`.
+> Verified against real Postgres and the local AI stub on seeded mail (the dev database is
+> currently empty — no mailbox is connected): the raw known-domains SQL found a
+> correspondent from the user's own sent mail, a lookalike of it with a DMARC fail scored
+> 100 with ten readable findings and escalated to the deep tier, a clean well-authenticated
+> newsletter came out SAFE at 8, the model's SAFE reading did not lower the floor, the
+> thread rollup landed on the right threads, and the appeal recorded without touching the
+> verdict. Not verified: real mail (there is none to assess), and the real model's judgment
+> — the stub answers layer 3 in development.
+> Next: Phase 8 — Outlook. The `MailProvider` port is the seam; Graph subscriptions replace
+> Gmail watches and `deltaLink` replaces the history id, behind the same interface. Layer 1
+> reads `authResults`, which `map.ts` fills per provider, so §6 needs no Outlook-specific
+> work beyond that parse.
 > Update this line as we progress.

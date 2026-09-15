@@ -29,8 +29,16 @@ const summarizeThread = vi.hoisted(() => vi.fn());
 const addBulk = vi.hoisted(() => vi.fn());
 const getJob = vi.hoisted(() => vi.fn());
 
+const assessMessageThreat = vi.hoisted(() => vi.fn());
+const refreshThreadThreatLevel = vi.hoisted(() => vi.fn());
+
 vi.mock("./classify.js", () => ({ classifyMessage }));
 vi.mock("./summarize.js", () => ({ summarizeThread }));
+vi.mock("../security/phishing.js", () => ({
+  assessMessageThreat,
+  refreshThreadThreatLevel,
+  THREAT_MESSAGE_SELECT: { authResults: true, attachments: true },
+}));
 vi.mock("../../lib/queues.js", () => ({
   aiEnrichQueue: () => ({ addBulk, getJob }),
   aiEnrichJobId: (id: string) => `enrich-${id}`,
@@ -61,6 +69,8 @@ const ROW = {
   hasAttachments: false,
   contentHash: "hash-1",
   threadId: "thread_1",
+  authResults: { spf: "pass", dkim: "pass", dmarc: "pass", returnPath: null, displayNameMismatch: false },
+  attachments: [],
   mailAccount: { emailAddress: "person@example.com" },
 };
 
@@ -85,9 +95,21 @@ beforeEach(() => {
     aiEnabled: true,
     autoSummarize: true,
     autoCategorize: true,
+    phishingProtection: true,
     dailyAiCallCap: 500,
   });
   classifyMessage.mockReset().mockResolvedValue(CLASSIFICATION);
+  assessMessageThreat.mockReset().mockResolvedValue({
+    level: "SAFE",
+    score: 0,
+    reasons: [],
+    rules: { score: 0, floor: "SAFE" },
+    intent: "BENIGN_MARKETING",
+    rulesOnly: false,
+    fromCache: false,
+    model: "claude-sonnet-5",
+  });
+  refreshThreadThreatLevel.mockReset().mockResolvedValue("SAFE");
   summarizeThread
     .mockReset()
     .mockResolvedValue({ summary: null, fromCache: false, skipped: "below-threshold" });
@@ -125,10 +147,100 @@ describe("runEnrich", () => {
     expect(threadUpdate).not.toHaveBeenCalled();
   });
 
-  it("never touches threatLevel, which phase 9 owns", async () => {
+  it("does not write threatLevel with the classification", async () => {
+    /*
+     * The threat level is a rollup of every message in the thread rather than a property
+     * of its newest one, so it is written by `refreshThreadThreatLevel` and not here. A
+     * classification that also set it would clear the banner on an older forged message
+     * every time a benign reply arrived.
+     */
     await runEnrich(JOB);
 
     expect(Object.keys(threadUpdate.mock.calls[0]?.[0].data)).not.toContain("threatLevel");
+    expect(refreshThreadThreatLevel).toHaveBeenCalledWith(USER_ID, "thread_1");
+  });
+
+  it("assesses the message and reports the verdict", async () => {
+    const result = await runEnrich(JOB);
+
+    expect(result.threatLevel).toBe("SAFE");
+    expect(assessMessageThreat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: USER_ID,
+        mailAccountId: MAIL_ACCOUNT_ID,
+        mailboxAddress: "person@example.com",
+      }),
+    );
+  });
+
+  it("classifies before it assesses", async () => {
+    // The classification row has to exist before there is somewhere to put a verdict.
+    const order: string[] = [];
+    classifyMessage.mockImplementation(async () => {
+      order.push("classify");
+      return CLASSIFICATION;
+    });
+    assessMessageThreat.mockImplementation(async () => {
+      order.push("assess");
+      return { level: "SAFE", score: 0, reasons: [], rules: {}, intent: null, rulesOnly: true, fromCache: false, model: null };
+    });
+
+    await runEnrich(JOB);
+
+    expect(order).toEqual(["classify", "assess"]);
+  });
+
+  it("does not assess the user's own sent mail", async () => {
+    // Scoring outbound mail would put a threat banner on the user's own words.
+    messageFindFirst.mockResolvedValue({ ...ROW, isOutbound: true });
+
+    const result = await runEnrich(JOB);
+
+    expect(assessMessageThreat).not.toHaveBeenCalled();
+    expect(result.skipped).toContain("threat-outbound");
+  });
+
+  it("does not lose the classification when the assessment throws", async () => {
+    /*
+     * A message that could not be assessed keeps its honest UNKNOWN and the sweep picks it
+     * up again. Failing the job would throw away the classification and the summary too,
+     * which is a worse outcome than one unassessed message.
+     */
+    assessMessageThreat.mockRejectedValue(new Error("link parse blew up"));
+
+    const result = await runEnrich(JOB);
+
+    expect(result.classified).toBe(true);
+    expect(result.skipped).toContain("threat-failed");
+    expect(result.threatLevel).toBeUndefined();
+  });
+
+  it("reports a spent cap as an outcome, not as a threat failure", async () => {
+    // A cap belongs to the pipeline as a whole and is handled by the existing cap path —
+    // it is not something the threat stage should swallow into "failed", where the
+    // distinction between "we could not" and "we ran out of budget" would be lost.
+    assessMessageThreat.mockRejectedValue(new AiCapExceededError("cap", { used: 500, cap: 500 }));
+
+    const result = await runEnrich(JOB);
+
+    expect(result.skipped).toContain("cap");
+    expect(result.skipped).not.toContain("threat-failed");
+  });
+
+  it("skips the whole layer when phishing protection is off", async () => {
+    settingsFindFirst.mockResolvedValue({
+      aiEnabled: true,
+      autoSummarize: true,
+      autoCategorize: true,
+      phishingProtection: false,
+      dailyAiCallCap: 500,
+    });
+
+    const result = await runEnrich(JOB);
+
+    expect(assessMessageThreat).not.toHaveBeenCalled();
+    expect(refreshThreadThreatLevel).not.toHaveBeenCalled();
+    expect(result.skipped).toContain("threat-off");
   });
 
   it("summarizes the thread with its messages oldest first", async () => {
