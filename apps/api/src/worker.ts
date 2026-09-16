@@ -9,8 +9,13 @@ import {
   aiSweepJobSchema,
   deltaJobSchema,
   watchJobSchema,
+  scheduleSendJobSchema,
+  scheduleSweepJobSchema,
+  followUpCheckJobSchema,
   scheduleAiSweep,
   scheduleWatchKeeper,
+  scheduleSendSweeper,
+  scheduleFollowUpCheck,
   backfillJobSchema,
   bullConnection,
   closeQueues,
@@ -21,6 +26,9 @@ import {
   type BackfillJob,
   type DeltaJob,
   type WatchJob,
+  type ScheduleSendJob,
+  type ScheduleSweepJob,
+  type FollowUpCheckJob,
 } from "./lib/queues.js";
 import { runBackfill } from "./services/sync.js";
 import { runEnrich } from "./services/ai/enrich.js";
@@ -28,6 +36,8 @@ import { sweepAllEnrichment } from "./services/ai/sweep.js";
 import { buildWritingStyle } from "./services/ai/style.js";
 import { runDelta } from "./services/deltaSync.js";
 import { runWatchKeeper } from "./services/watch.js";
+import { runScheduledSend, sweepDueScheduledEmails } from "./services/schedule.js";
+import { runFollowUpCheck } from "./services/followUps.js";
 import { MailAccountRevokedError, NotFoundError } from "./lib/errors.js";
 import { ConflictError } from "./lib/errors.js";
 
@@ -267,6 +277,70 @@ async function processWatch(job: Job<WatchJob>): Promise<void> {
   }
 }
 
+/**
+ * One scheduled send becoming due (§9).
+ *
+ * The important thing about this function is what it does *not* do on failure.
+ * `runScheduledSend` returns `{ status: "failed" }` after writing FAILED and the error
+ * to the row — it does not throw, so BullMQ records a completed job, and there is no
+ * retry. That is the phase-6 send rule carried forward: a send whose outcome is unknown
+ * is not attempted again, because the provider may have accepted the message before the
+ * error and a second attempt would put the user's mail in somebody's inbox twice.
+ *
+ * The queue is configured with `attempts: 1` as well (`SCHEDULE_SEND_JOB_OPTIONS`), so
+ * this holds even if a future change here starts throwing.
+ */
+async function processScheduledSend(job: Job<ScheduleSendJob>): Promise<void> {
+  const payload = scheduleSendJobSchema.parse(job.data);
+  const log = logger.child({
+    userId: payload.userId,
+    scheduledEmailId: payload.scheduledEmailId,
+  });
+
+  const controller = new AbortController();
+  const key = `schedsend-${job.id ?? payload.scheduledEmailId}`;
+  inFlight.set(key, controller);
+
+  try {
+    const result = await runScheduledSend(payload, { signal: controller.signal });
+    log.debug({ jobId: job.id, ...result }, "scheduled send job finished");
+  } finally {
+    controller.abort();
+    inFlight.delete(key);
+  }
+}
+
+/**
+ * The scheduled-send sweeper (§9): re-enqueue anything overdue.
+ *
+ * This is the job that makes "the DB row is recoverable on its own" true. Redis losing
+ * a delayed job — an eviction, a restart without persistence, a development
+ * `FLUSHALL` — would otherwise mean a send the user is counting on never fires, with no
+ * error anywhere. One indexed query per minute turns that into a delay of at most a
+ * minute.
+ */
+async function processScheduleSweep(job: Job<ScheduleSweepJob>): Promise<void> {
+  scheduleSweepJobSchema.parse(job.data);
+  const result = await sweepDueScheduledEmails();
+  if (result.found > 0) {
+    logger.info({ jobId: job.id, ...result }, "scheduled-send sweep found overdue sends");
+  }
+}
+
+/**
+ * The follow-up check (§9): resolve, then trigger, then digest.
+ *
+ * Never throws per reminder — `runFollowUpCheck` counts failures and continues — so one
+ * bad row cannot stop everybody else's reminders from resolving.
+ */
+async function processFollowUpCheck(job: Job<FollowUpCheckJob>): Promise<void> {
+  followUpCheckJobSchema.parse(job.data);
+  const result = await runFollowUpCheck();
+  if (result.resolved > 0 || result.triggered > 0 || result.digestsSent > 0) {
+    logger.info({ jobId: job.id, ...result }, "follow-up check did work");
+  }
+}
+
 const worker = new Worker<BackfillJob>(QUEUE_NAMES.syncBackfill, processBackfill, {
   connection: bullConnection,
   concurrency: WORKER_CONCURRENCY,
@@ -327,6 +401,74 @@ watchWorker.on("error", (error) => {
   logger.warn({ err: error }, "watch worker error");
 });
 
+/**
+ * Scheduled sends.
+ *
+ * Concurrency 3: these are one provider call each and they cluster on the hour, because
+ * that is when people schedule things. Wider would not help — the rate limiter below
+ * is per worker and a mailbox's own quota is the real bound.
+ */
+const scheduleSendWorker = new Worker<ScheduleSendJob>(
+  QUEUE_NAMES.scheduleSend,
+  processScheduledSend,
+  { connection: bullConnection, concurrency: 3 },
+);
+
+scheduleSendWorker.on("failed", (job, error) => {
+  abortJob(`schedsend-${job?.id}`, "job failed");
+  // A failure that reaches here is an unexpected throw rather than a failed send —
+  // `runScheduledSend` records those on the row and returns. Either way: no retry.
+  logger.error(
+    { queue: QUEUE_NAMES.scheduleSend, jobId: job?.id, err: error },
+    "scheduled send job failed",
+  );
+});
+
+scheduleSendWorker.on("stalled", (jobId) => {
+  abortJob(`schedsend-${jobId}`, "job stalled");
+  logger.warn({ queue: QUEUE_NAMES.scheduleSend, jobId }, "scheduled send job stalled");
+});
+
+scheduleSendWorker.on("error", (error) => {
+  logger.warn({ err: error }, "scheduled send worker error");
+});
+
+const scheduleSweepWorker = new Worker<ScheduleSweepJob>(
+  QUEUE_NAMES.scheduleSweep,
+  processScheduleSweep,
+  // One at a time: two concurrent sweeps would race to enqueue the same due rows. The
+  // job id dedupe would absorb it, but there is nothing to gain from the race.
+  { connection: bullConnection, concurrency: 1 },
+);
+
+scheduleSweepWorker.on("failed", (job, error) => {
+  logger.error(
+    { queue: QUEUE_NAMES.scheduleSweep, jobId: job?.id, err: error },
+    "scheduled-send sweep failed",
+  );
+});
+
+scheduleSweepWorker.on("error", (error) => {
+  logger.warn({ err: error }, "schedule sweep worker error");
+});
+
+const followUpWorker = new Worker<FollowUpCheckJob>(
+  QUEUE_NAMES.followupCheck,
+  processFollowUpCheck,
+  { connection: bullConnection, concurrency: 1 },
+);
+
+followUpWorker.on("failed", (job, error) => {
+  logger.error(
+    { queue: QUEUE_NAMES.followupCheck, jobId: job?.id, err: error },
+    "follow-up check failed",
+  );
+});
+
+followUpWorker.on("error", (error) => {
+  logger.warn({ err: error }, "follow-up worker error");
+});
+
 const styleWorker = new Worker<AiStyleJob>(QUEUE_NAMES.aiStyle, processStyle, {
   connection: bullConnection,
   // One at a time: it is a per-user job that runs once a month at most, and the only
@@ -370,6 +512,16 @@ await scheduleAiSweep();
 // The watch keeper, on the same terms: a property of the deployment, converging on one
 // schedule however many times a worker restarts.
 await scheduleWatchKeeper();
+
+/*
+ * The scheduled-send sweeper and the follow-up check, on the same terms: a property of
+ * the deployment, upserted so a restart converges on one schedule rather than adding a
+ * second. The sweeper runs every minute — far more often than the other keepers —
+ * because it is the only thing between a lost Redis job and mail that silently never
+ * goes out (see SCHEDULE_SWEEP_INTERVAL_MS).
+ */
+await scheduleSendSweeper();
+await scheduleFollowUpCheck();
 
 enrichWorker.on("failed", (job, error) => {
   abortJob(`enrich-${job?.id}`, "job failed");
@@ -427,6 +579,9 @@ logger.info(
       QUEUE_NAMES.aiStyle,
       QUEUE_NAMES.syncDelta,
       QUEUE_NAMES.syncWatch,
+      QUEUE_NAMES.scheduleSend,
+      QUEUE_NAMES.scheduleSweep,
+      QUEUE_NAMES.followupCheck,
     ],
     concurrency: { backfill: WORKER_CONCURRENCY, enrich: ENRICH_CONCURRENCY },
     env: env.NODE_ENV,
@@ -447,6 +602,11 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     styleWorker.close(),
     deltaWorker.close(),
     watchWorker.close(),
+    // Waited on like the rest: a deploy must not abandon a send mid-flight, because
+    // nothing downstream can tell whether it went out.
+    scheduleSendWorker.close(),
+    scheduleSweepWorker.close(),
+    followUpWorker.close(),
   ]);
   await Promise.allSettled([closeQueues(), disconnectRedis(), disconnectDatabase()]);
   process.exit(0);

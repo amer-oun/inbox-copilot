@@ -13,12 +13,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const threadFindMany = vi.hoisted(() => vi.fn());
 const threadFindFirst = vi.hoisted(() => vi.fn());
+/**
+ * `UserSettings.translationLang`, which `getThread` reads for the language control's
+ * default. Resolves to null by default — a user who has set no default language is the
+ * normal starting state, and the read must not depend on the row existing.
+ */
+const settingsFindFirst = vi.hoisted(() => vi.fn(async () => null));
 const tenantCalls = vi.hoisted(() => [] as string[]);
 
 vi.mock("@inbox-copilot/db", () => ({
   dbForUser: (userId: string) => {
     tenantCalls.push(userId);
-    return { thread: { findMany: threadFindMany, findFirst: threadFindFirst } };
+    return {
+      thread: { findMany: threadFindMany, findFirst: threadFindFirst },
+      // The thread read also asks for the user's default translation language (§9).
+      userSettings: { findFirst: settingsFindFirst },
+    };
   },
   Prisma: {},
 }));
@@ -74,6 +84,7 @@ beforeEach(() => {
   tenantCalls.length = 0;
   threadFindMany.mockReset().mockResolvedValue([row()]);
   threadFindFirst.mockReset();
+  settingsFindFirst.mockReset().mockResolvedValue(null);
 });
 
 describe("listThreads ordering", () => {

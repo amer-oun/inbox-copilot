@@ -4,6 +4,7 @@ import { BadRequestError, NotFoundError } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
 import { mailProviderFor } from "../providers/registry.js";
 import type { RawAddress } from "../providers/mailProvider.js";
+import { createFollowUpReminder } from "./followUps.js";
 
 /**
  * Sending (rule 1, and the reason the rest of the AI layer is shaped the way it is).
@@ -52,6 +53,8 @@ export interface SendReplyInput {
   body: string;
   /** Which offered draft this came from, for `wasUsed`/`editedBody`. */
   draftId?: string;
+  /** The user asked to be reminded if nobody answers this (§9). */
+  expectsReply?: boolean;
   signal?: AbortSignal;
 }
 
@@ -256,6 +259,29 @@ export async function sendReply(input: SendReplyInput): Promise<SendResultDto> {
         }),
   });
 
+  /*
+   * The reminder, after the send — never before.
+   *
+   * Same ordering as the draft feedback below and for the same reason: the mail has
+   * left the building and no local write can recall it, so everything after this point
+   * is bookkeeping that must not be able to report failure for a successful send. A
+   * reminder created *before* a send that then failed would be worse than no reminder:
+   * it would chase a reply to a message that does not exist.
+   *
+   * The watched id is the provider's, because the sent message has no `Message` row
+   * yet — the sync engine owns that table and the next delta brings it (see
+   * `services/followUps.ts` for why the column is not a foreign key).
+   */
+  const reminderId =
+    input.expectsReply === true
+      ? await tryCreateReminder({
+          userId: input.userId,
+          threadId: thread.id,
+          watchedMessageId: sent.providerMessageId,
+          reason: replySubject(parent.subject),
+        })
+      : null;
+
   const feedback = await recordDraftFeedback({
     userId: input.userId,
     threadId: thread.id,
@@ -272,6 +298,7 @@ export async function sendReply(input: SendReplyInput): Promise<SendResultDto> {
       usedDraftId: feedback.usedDraftId,
       edited: feedback.edited,
       bodyChars: body.length,
+      reminderId,
     },
     "reply sent",
   );
@@ -282,7 +309,32 @@ export async function sendReply(input: SendReplyInput): Promise<SendResultDto> {
     sentAt: new Date().toISOString(),
     usedDraftId: feedback.usedDraftId,
     edited: feedback.edited,
+    reminderId,
   };
+}
+
+/**
+ * Creates the follow-up reminder, and never lets it fail the send.
+ *
+ * Returns null on any problem, including "this thread already has an open reminder" —
+ * see `createFollowUpReminder`, which refuses to stack them.
+ */
+async function tryCreateReminder(input: {
+  userId: string;
+  threadId: string;
+  watchedMessageId: string;
+  reason: string;
+}): Promise<string | null> {
+  try {
+    const reminder = await createFollowUpReminder(input);
+    return reminder?.id ?? null;
+  } catch (error) {
+    logger.error(
+      { err: error, userId: input.userId, threadId: input.threadId },
+      "sent the reply but could not create its follow-up reminder",
+    );
+    return null;
+  }
 }
 
 /**

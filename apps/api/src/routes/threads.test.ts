@@ -91,6 +91,8 @@ const DETAIL = {
   // §6's assessment, absent here: this thread has not been assessed, and the route
   // must pass that through as null rather than inventing a reassuring verdict.
   threat: null,
+  // §9: the language control's default. Null is "this user has not set one".
+  defaultTranslationLang: null,
   summary: null,
   messages: [
     {

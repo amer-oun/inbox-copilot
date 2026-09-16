@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, Send, Sparkles, TriangleAlert } from "lucide-react";
+import { BellRing, CalendarClock, Check, Loader2, Send, Sparkles, TriangleAlert } from "lucide-react";
 import {
   replyDraftsResponseSchema,
   replyToneSchema,
+  scheduledEmailSchema,
   sendResultSchema,
   type AddressDto,
   type ReplyDraftDto,
@@ -69,6 +70,40 @@ async function postJson(path: string, body: unknown): Promise<unknown> {
   return payload;
 }
 
+/**
+ * The browser's own IANA zone, which is what the schedule request carries (§9).
+ *
+ * `Intl` gives the *zone*, not an offset, and that is the whole point: the server
+ * stores this string alongside the wall-clock time, so "9am" is re-resolved under
+ * whatever the rules say in October rather than frozen against today's offset. A
+ * browser that somehow reports nothing falls back to UTC, which is at least a real
+ * zone — the alternative, guessing from `getTimezoneOffset()`, is the offset mistake
+ * this whole design avoids.
+ */
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/** `YYYY-MM-DDTHH:mm` in local time, for the `datetime-local` default and its `min`. */
+function localWallClock(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
+
+/** Tomorrow at 9am local, the default a "send later" control should open on. */
+function defaultSchedule(): string {
+  const when = new Date();
+  when.setDate(when.getDate() + 1);
+  when.setHours(9, 0, 0, 0);
+  return localWallClock(when);
+}
+
 export interface ReplyComposerProps {
   threadId: string;
   /** From the API. Empty means there is nobody to reply to. */
@@ -89,6 +124,12 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
   const [pendingPick, setPendingPick] = useState<ReplyDraftDto | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  /** The schedule panel, closed by default: sending now is still the normal case. */
+  const [scheduling, setScheduling] = useState(false);
+  const [sendAtLocal, setSendAtLocal] = useState(defaultSchedule);
+  const [expectsReply, setExpectsReply] = useState(false);
+  const [scheduledFor, setScheduledFor] = useState<string | null>(null);
+  const timeZone = browserTimeZone();
 
   const selected = drafts.find((draft) => draft.id === selectedId) ?? null;
   const edited = selected !== null && body.trim() !== selected.body.trim();
@@ -115,6 +156,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
     mutationFn: async () => {
       const payload = await postJson(`/api/proxy/threads/${threadId}/reply`, {
         body,
+        expectsReply,
         ...(selectedId === null ? {} : { draftId: selectedId }),
       });
       return sendResultSchema.parse(payload);
@@ -127,6 +169,36 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
       setSelectedId(null);
       // The sent message itself arrives with the next sync (the API does not fabricate
       // a row for it), so this refresh updates the thread, not necessarily its contents.
+      router.refresh();
+    },
+  });
+
+  /**
+   * Scheduling, which is a *different request* from sending and not a mode of it.
+   *
+   * It carries the same thing the send carries — the text in the textarea — plus a wall
+   * clock and this browser's IANA zone. Rule 1 is unaffected by the delay: what goes out
+   * at 9am is text a person had on screen and submitted, and the API has no endpoint
+   * that would schedule a draft by id.
+   */
+  const schedule = useMutation({
+    mutationFn: async () => {
+      const payload = await postJson(`/api/proxy/scheduled/replies`, {
+        threadId,
+        body,
+        sendAtLocal,
+        timezone: timeZone,
+        expectsReply,
+        ...(selectedId === null ? {} : { draftId: selectedId }),
+      });
+      return scheduledEmailSchema.parse(payload);
+    },
+    onSuccess: (data) => {
+      setScheduledFor(data.sendAtLocal ?? data.sendAt);
+      setScheduling(false);
+      setBody("");
+      setDrafts([]);
+      setSelectedId(null);
       router.refresh();
     },
   });
@@ -306,17 +378,109 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                * one action in this application that cannot be undone — no draft state,
                * no local rollback, no recall — so it is worth one more click.
                */
-              <Button
-                size="sm"
-                onClick={() => setConfirming(true)}
-                disabled={body.trim() === "" || send.isPending}
-              >
-                <Send aria-hidden="true" className="size-3.5" />
-                Send reply
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setScheduling((open) => !open)}
+                  aria-expanded={scheduling}
+                  disabled={body.trim() === ""}
+                >
+                  <CalendarClock aria-hidden="true" className="size-3.5" />
+                  Send later
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setConfirming(true)}
+                  disabled={body.trim() === "" || send.isPending}
+                >
+                  <Send aria-hidden="true" className="size-3.5" />
+                  Send reply
+                </Button>
+              </>
             )}
           </div>
         </div>
+
+        {scheduling && (
+          <div className="mt-3 rounded-lg border border-border-subtle bg-canvas px-3 py-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label
+                  htmlFor="reply-send-at"
+                  className="block text-xs font-medium text-ink"
+                >
+                  Send at
+                </label>
+                <input
+                  id="reply-send-at"
+                  type="datetime-local"
+                  value={sendAtLocal}
+                  min={localWallClock(new Date())}
+                  onChange={(event) => setSendAtLocal(event.target.value)}
+                  className="mt-1 h-8 rounded-lg border border-border-subtle bg-surface px-2 text-xs text-ink"
+                />
+              </div>
+
+              <Button
+                size="sm"
+                onClick={() => schedule.mutate()}
+                disabled={schedule.isPending || sendAtLocal === ""}
+              >
+                {schedule.isPending ? (
+                  <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                ) : (
+                  <CalendarClock aria-hidden="true" className="size-3.5" />
+                )}
+                Schedule
+              </Button>
+
+              <Button size="sm" variant="ghost" onClick={() => setScheduling(false)}>
+                Cancel
+              </Button>
+            </div>
+
+            <label className="mt-3 flex items-start gap-2 text-xs text-ink">
+              <input
+                type="checkbox"
+                checked={expectsReply}
+                onChange={(event) => setExpectsReply(event.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <BellRing aria-hidden="true" className="mr-1 inline size-3" />
+                Remind me if nobody replies. The reminder clears itself as soon as
+                anything arrives on this thread.
+              </span>
+            </label>
+
+            {/*
+              The zone is stated rather than assumed. A person scheduling mail while
+              travelling needs to know which "9am" they just picked, and the server
+              stores this zone — not an offset — so the time still means 9am after a DST
+              change.
+            */}
+            <p className="mt-2 text-xs text-muted">
+              {`Your time zone: ${timeZone}. Stored as a zone, so this stays 9am across a clock change.`}
+            </p>
+
+            {schedule.isError && (
+              <p role="alert" className="mt-2 text-sm text-danger">
+                {`Not scheduled: ${schedule.error.message}`}
+              </p>
+            )}
+          </div>
+        )}
+
+        {scheduledFor !== null && (
+          <p role="status" className="mt-2 flex items-center gap-1.5 text-sm text-success">
+            <Check aria-hidden="true" className="size-4" />
+            {`Scheduled for ${scheduledFor.replace("T", " ")} (${timeZone}). `}
+            <a href="/scheduled" className="underline">
+              See scheduled sends
+            </a>
+          </p>
+        )}
 
         {send.isError && (
           <p role="alert" className="mt-2 text-sm text-danger">

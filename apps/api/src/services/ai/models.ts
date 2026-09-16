@@ -29,6 +29,16 @@ export const FEATURE_MODELS = {
   // injected into every reply the user ever sees — the one call worth not saving on.
   style: MODELS.standard,
   /*
+   * Translation, on the standard tier as §5 routes it.
+   *
+   * Not the fast tier, even though it is per-message and the cheap model can translate:
+   * this output is read *as the sender's words*, and the failure mode of a weaker
+   * translator is not a clumsy sentence but a changed meaning in a message the user is
+   * deciding whether to trust. It is also cached per (message, language) for ever, so
+   * the cost is paid once per thing a person actually chose to read.
+   */
+  translate: MODELS.standard,
+  /*
    * Threat assessment, in two tiers (§6 layer 3).
    *
    * `threat` runs on every inbound message that the deterministic layers did not
@@ -60,6 +70,14 @@ export const MAX_OUTPUT_TOKENS = {
   reply: 3_072,
   compose: 1_536,
   style: 1_024,
+  /*
+   * Generous, and it has to be: unlike every other ceiling here the output is roughly
+   * the size of the *input*, and a body truncated at the prompt boundary
+   * (`MAX_BODY_CHARS`) can still be twelve thousand characters of prose. Cutting a
+   * translation off mid-sentence would be the worst of the failure modes — the reader
+   * cannot tell a truncated translation from a short email.
+   */
+  translate: 8_192,
   /*
    * An intent, a level, a confidence and at most 600 characters of explanation. The
    * ceiling is deliberately tight: a threat assessment that needs a thousand tokens to

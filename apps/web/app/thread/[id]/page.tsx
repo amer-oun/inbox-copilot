@@ -104,7 +104,11 @@ export default async function ThreadPage({ params }: ThreadPageProps) {
       */}
       <div className="mt-5 space-y-4">
         {thread.messages.map((message) => (
-          <MessageCard key={message.id} message={message} />
+          <MessageCard
+            key={message.id}
+            message={message}
+            defaultTranslationLang={thread.defaultTranslationLang}
+          />
         ))}
       </div>
 

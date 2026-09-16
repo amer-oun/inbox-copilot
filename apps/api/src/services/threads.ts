@@ -284,6 +284,17 @@ export async function getThread(input: {
 
   if (!row) throw new NotFoundError("Thread not found");
 
+  /*
+   * One extra indexed read for the language control's default (§9). Deliberately not
+   * folded into the thread query as a relation: `UserSettings` hangs off `User`, not off
+   * the thread, and joining it through the mailbox to save a round trip would make the
+   * thread read depend on a table it has no business knowing about.
+   */
+  const settings = await dbForUser(input.userId).userSettings.findFirst({
+    where: { userId: input.userId },
+    select: { translationLang: true },
+  });
+
   const messages: MessageDto[] = row.messages.map((message) => {
     const sanitized = sanitizeEmailHtml(message.bodyHtml);
     return {
@@ -321,6 +332,7 @@ export async function getThread(input: {
     needsReply: row.needsReply,
     language: row.language,
     threatLevel: row.threatLevel,
+    defaultTranslationLang: settings?.translationLang ?? null,
     summary: summary
       ? {
           headline: summary.headline,

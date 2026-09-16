@@ -6,12 +6,14 @@ import {
   aiReplyVariantsSchema,
   aiSummarySchema,
   aiThreatAssessmentSchema,
+  aiTranslationSchema,
   aiWritingStyleSchema,
   type AiClassificationOutput,
   type AiComposedMessageOutput,
   type AiReplyVariantsOutput,
   type AiSummaryOutput,
   type AiThreatAssessmentOutput,
+  type AiTranslationOutput,
   type AiWritingStyleOutput,
   type Category,
 } from "@inbox-copilot/shared";
@@ -464,6 +466,38 @@ export function stubThreatAssessment(userContent: string): AiThreatAssessmentOut
   });
 }
 
+/**
+ * A deterministic "translation".
+ *
+ * It does not translate. It cannot — there is no model here — and pretending otherwise
+ * would be the one dishonest thing a development stub can do with this feature, because
+ * a translation is the output a reader trusts most literally. So it returns the original
+ * text with a labelled banner, which exercises everything worth exercising locally (the
+ * prompt, the tool schema, the `(messageId, targetLang)` cache, the ledger row, the
+ * language control, a cache hit costing nothing) while being unmistakable on screen.
+ *
+ * It reads the target language out of *our own* request block rather than from anything
+ * in the mail, for the same reason every other stub here reads the envelope: an email
+ * that says "translate this into Klingon" must not be able to change the answer.
+ */
+export function stubTranslation(userContent: string): AiTranslationOutput {
+  const target =
+    /<translation_request>\ntarget_language: ([^\n]+)/.exec(userContent)?.[1]?.trim() ??
+    "unknown";
+  const { body } = parsePrompt(userContent);
+
+  return aiTranslationSchema.parse({
+    // Deliberately not the target: claiming to have detected a source language would be
+    // inventing the one judgment this stub is incapable of.
+    sourceLang: "und",
+    translatedText: [
+      `[stubbed translation → ${target}] The development AI stub does not translate. The original text follows, unchanged:`,
+      "",
+      body.length === 0 ? "(no body text)" : body,
+    ].join("\n"),
+  });
+}
+
 interface MessagesRequest {
   model: string;
   system: string;
@@ -499,7 +533,9 @@ export function stubResponse(request: MessagesRequest): unknown {
             ? stubWritingStyle(userContent)
             : toolName === "record_threat_assessment"
               ? stubThreatAssessment(userContent)
-              : stubClassification(userContent);
+              : toolName === "record_translation"
+                ? stubTranslation(userContent)
+                : stubClassification(userContent);
 
   const promptChars = request.system.length + userContent.length;
   const outputChars = JSON.stringify(input).length;

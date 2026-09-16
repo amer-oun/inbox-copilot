@@ -81,6 +81,8 @@ const SENT = {
   sentAt: "2026-09-13T10:05:00.000Z",
   usedDraftId: DRAFT_ID,
   edited: false,
+  // §9: null unless the user ticked "remind me if nobody replies".
+  reminderId: null,
 };
 
 beforeEach(() => {
@@ -166,6 +168,7 @@ describe("POST /threads/:id/reply", () => {
       threadId: THREAD_ID,
       body: "Sending a revised invoice today.",
       draftId: DRAFT_ID,
+      expectsReply: false,
     });
   });
 
@@ -203,6 +206,8 @@ describe("POST /threads/:id/reply", () => {
       userId: USER_ID,
       threadId: THREAD_ID,
       body: "ok",
+      // Defaulted by the schema, not taken from the payload's extra keys.
+      expectsReply: false,
     });
   });
 

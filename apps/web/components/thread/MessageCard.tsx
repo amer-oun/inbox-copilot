@@ -3,6 +3,7 @@ import type { MessageDto } from "@inbox-copilot/shared";
 import { Badge } from "../ui/badge";
 import { cn } from "../../lib/utils";
 import { MessageBody } from "./MessageBody";
+import { TranslateControl } from "./TranslateControl";
 
 /**
  * One message: its envelope, its attachments, and its body.
@@ -59,7 +60,13 @@ function AttachmentList({ attachments }: { attachments: MessageDto["attachments"
   );
 }
 
-export function MessageCard({ message }: { message: MessageDto }) {
+export interface MessageCardProps {
+  message: MessageDto;
+  /** The user's default translation language, from the thread read. */
+  defaultTranslationLang?: string | null;
+}
+
+export function MessageCard({ message, defaultTranslationLang = null }: MessageCardProps) {
   const sender = message.from.name ?? message.from.email;
 
   return (
@@ -102,6 +109,15 @@ export function MessageCard({ message }: { message: MessageDto }) {
       </div>
 
       <AttachmentList attachments={message.attachments} />
+
+      {/*
+        The language control (§9). Offered on every message with text, including the
+        user's own: a thread read in translation should not have one unreadable
+        paragraph in the middle of it.
+      */}
+      {(message.bodyText !== null || message.bodyHtmlSanitized !== null) && (
+        <TranslateControl messageId={message.id} defaultLang={defaultTranslationLang} />
+      )}
     </article>
   );
 }

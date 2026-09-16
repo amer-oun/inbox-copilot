@@ -17,7 +17,7 @@ import { auth } from "../../../../auth";
  *      uses and nothing else. The user is authenticated either way, so this is not a
  *      privilege boundary — it keeps the surface honest, so "what can the browser
  *      call?" has a short answer that lives in one place. Phase 6 adds three POSTs to
- *      it, and one of them sends mail.
+ *      it, and one of them sends mail; phase 10 adds one that sends mail *later*.
  *   2. **Same-origin only, for writes.** See `assertSameOrigin`.
  */
 
@@ -26,6 +26,8 @@ const ALLOWED_GET_PATHS: RegExp[] = [
   /^threads$/,
   /^threads\/c[a-z0-9]{24}$/,
   /^writing-style$/,
+  /^scheduled$/, // what is queued to go out, and what failed
+  /^follow-ups$/, // threads waiting on a reply
 ];
 
 /**
@@ -43,10 +45,23 @@ const ALLOWED_POST_PATHS: RegExp[] = [
   /^compose$/, // draft a new message
   /^writing-style$/, // rebuild the style profile
   /^messages\/c[a-z0-9]{24}\/threat-appeal$/, // "this is safe" — records, changes no verdict
+  /*
+   * Phase 10. The first entry is the second path in this list that can put mail on the
+   * wire — later rather than now, which is exactly why it is spelled out here next to
+   * the immediate send rather than folded into a wildcard. Note what is *not* here:
+   * nothing that schedules a stored draft by id, because the API has no such route
+   * (rule 1 survives the delay).
+   */
+  /^scheduled\/replies$/, // queue a reply the user wrote, to send later
+  /^scheduled\/messages$/, // queue a new message the user wrote
+  /^scheduled\/c[a-z0-9]{24}\/cancel$/, // unqueue one
+  /^follow-ups\/c[a-z0-9]{24}\/dismiss$/, // "handled"
+  /^follow-ups\/c[a-z0-9]{24}\/snooze$/, // "not yet"
+  /^messages\/c[a-z0-9]{24}\/translate$/, // translate a body; cached per (message, language)
 ];
 
 /** Query parameters that may be forwarded. Anything else is dropped. */
-const ALLOWED_QUERY = new Set(["category", "cursor", "limit", "force"]);
+const ALLOWED_QUERY = new Set(["category", "cursor", "limit", "force", "status"]);
 
 /** A JSON body larger than this is not a reply anyone typed. */
 const MAX_BODY_BYTES = 128 * 1024;

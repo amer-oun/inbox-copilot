@@ -10,6 +10,7 @@ import {
 } from "../lib/queues.js";
 import { mailProviderFor } from "../providers/registry.js";
 import { enqueueEnrichment } from "./ai/enrich.js";
+import { runFollowUpCheck } from "./followUps.js";
 import { persistThread } from "./sync.js";
 import { startBackfill } from "./sync.js";
 import type { MailProvider, RawChange } from "../providers/mailProvider.js";
@@ -64,6 +65,8 @@ export interface DeltaResult {
   skipped?: string;
   /** Set when this delta could not proceed and recovered another way. */
   recovered?: "backfill";
+  /** Follow-up reminders this delta's inbound mail resolved (§9). */
+  remindersResolved?: number;
 }
 
 /**
@@ -233,6 +236,31 @@ export async function runDelta(
      * deferred it does **not** move: their changes are inside this window, and
      * advancing past them would drop the ones we did not fetch.
      */
+    /*
+     * An inbound message on a thread the user is waiting on is the cancellation
+     * condition for a follow-up reminder (§9), and this is the earliest honest place to
+     * act on it: the messages are committed, so a check run now sees them.
+     *
+     * Doing it here rather than leaving it to the quarter-hourly job is not an
+     * optimization, it is the difference between the feature being usable and not. A
+     * reminder that lingers for fifteen minutes after the reply arrived is a reminder
+     * the user reads as wrong — and it is the digest's cadence that would then mail
+     * them about a thread they have already dealt with. The scheduled check remains the
+     * backstop for replies that arrive while this process is down.
+     *
+     * Scoped to this user and never allowed to fail the delta: the sync's job is mail,
+     * and a reminder that resolves fifteen minutes late is a far smaller problem than a
+     * sync that reports failure and re-reads a mailbox.
+     */
+    if (result.messages > 0) {
+      try {
+        const check = await runFollowUpCheck({ userId });
+        if (check.resolved > 0) result.remindersResolved = check.resolved;
+      } catch (error) {
+        log.warn({ err: error }, "delta wrote mail but the follow-up check failed");
+      }
+    }
+
     if (deferred > 0) {
       log.warn(
         { threads: threadIds.length, fetched: batch.length, deferred },

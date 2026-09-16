@@ -13,6 +13,15 @@ const mailProviderFor = vi.hoisted(() => vi.fn());
 
 vi.mock("../providers/registry.js", () => ({ mailProviderFor }));
 
+/**
+ * The follow-up reminder the send path creates when the user asked for one (§9).
+ *
+ * Mocked: what this file owns is *when* it is called — after the mail has gone, never
+ * before, and never able to fail the send. What it decides is `followUps.test.ts`.
+ */
+const createFollowUpReminder = vi.hoisted(() => vi.fn());
+vi.mock("./followUps.js", () => ({ createFollowUpReminder }));
+
 const threadFindFirst = vi.hoisted(() => vi.fn());
 const draftFindFirst = vi.hoisted(() => vi.fn());
 const draftUpdate = vi.hoisted(() => vi.fn());
@@ -79,6 +88,7 @@ beforeEach(() => {
   threadFindFirst.mockReset().mockResolvedValue(thread());
   draftFindFirst.mockReset().mockResolvedValue(null);
   draftUpdate.mockReset().mockResolvedValue({});
+  createFollowUpReminder.mockReset().mockResolvedValue(null);
 });
 
 describe("parseFormattedAddress", () => {
@@ -361,5 +371,85 @@ describe("draft feedback", () => {
 
     expect(result.usedDraftId).toBeNull();
     expect(draftFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("the follow-up reminder", () => {
+  it("creates none unless the user asked for one", async () => {
+    // Default off. A reminder nobody asked for is a notification nobody wants — and it
+    // is not taken from `needsReply` either, which is the model's opinion about mail
+    // *arriving* rather than about who owes the user an answer.
+    await sendReply({ userId: USER_ID, threadId: THREAD_ID, body: "ok" });
+
+    expect(createFollowUpReminder).not.toHaveBeenCalled();
+  });
+
+  it("watches the provider's message id, because ours does not exist yet", async () => {
+    /*
+     * The sent message has no `Message` row at this moment: the sync engine owns that
+     * table and the next delta brings the real row. The provider's id is the only
+     * identifier that exists here, which is why the column is not a foreign key.
+     */
+    createFollowUpReminder.mockResolvedValue({ id: "cldd4kzai000908l3a1b2c3d4" });
+
+    const result = await sendReply({
+      userId: USER_ID,
+      threadId: THREAD_ID,
+      body: "ok",
+      expectsReply: true,
+    });
+
+    expect(createFollowUpReminder).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: USER_ID, threadId: THREAD_ID, watchedMessageId: "sent_1" }),
+    );
+    expect(result.reminderId).toBe("cldd4kzai000908l3a1b2c3d4");
+  });
+
+  it("creates it only after the send succeeded", async () => {
+    /*
+     * A reminder to chase a reply to mail that never went out is worse than no reminder.
+     * The send throws, so nothing is created — and because the reminder write comes
+     * after `sendMessage`, this ordering is structural rather than a check.
+     */
+    sendMessage.mockRejectedValue(new Error("502 Bad Gateway"));
+
+    await expect(
+      sendReply({ userId: USER_ID, threadId: THREAD_ID, body: "ok", expectsReply: true }),
+    ).rejects.toThrow();
+
+    expect(createFollowUpReminder).not.toHaveBeenCalled();
+  });
+
+  it("never turns a failed reminder into a failed send", async () => {
+    /*
+     * The mail has left the building and no local write can recall it, so everything
+     * after that point is bookkeeping. The one thing worse than losing a reminder is a
+     * user who reads "not sent" about mail that went out and sends it again.
+     */
+    createFollowUpReminder.mockRejectedValue(new Error("db blip"));
+
+    const result = await sendReply({
+      userId: USER_ID,
+      threadId: THREAD_ID,
+      body: "ok",
+      expectsReply: true,
+    });
+
+    expect(result.providerMessageId).toBe("sent_1");
+    expect(result.reminderId).toBeNull();
+  });
+
+  it("reports null when the thread already had an open reminder", async () => {
+    // `createFollowUpReminder` refuses to stack them; the send is unaffected.
+    createFollowUpReminder.mockResolvedValue(null);
+
+    const result = await sendReply({
+      userId: USER_ID,
+      threadId: THREAD_ID,
+      body: "ok",
+      expectsReply: true,
+    });
+
+    expect(result.reminderId).toBeNull();
   });
 });

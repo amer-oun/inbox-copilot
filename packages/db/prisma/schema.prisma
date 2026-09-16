@@ -518,8 +518,30 @@ model ScheduledEmail {
   bodyHtml String   @db.Text
   bodyText String?  @db.Text
 
+  /// The instant the send is due, resolved from `localSendAt` in `timezone`. This is
+  /// what the sweeper's index is on — a comparison against `now()` has to be a
+  /// comparison between instants.
   sendAt   DateTime
+  /// The user's IANA zone, never an offset (§9). An offset is a fact about one
+  /// moment; a zone is the rule, and only the rule still says "9am" after a DST change.
   timezone String
+  /// The wall-clock time the user actually chose, as `YYYY-MM-DDTHH:mm` with no zone.
+  ///
+  /// `sendAt` is derived from this pair and can therefore go stale: a government moves
+  /// a DST boundary, or the tz database corrects one, and the instant that was 9am in
+  /// Tunis no longer is. This column is what makes that recoverable — the sweeper
+  /// re-resolves it and corrects `sendAt` rather than sending an hour out. Null on rows
+  /// written before this existed, which means "trust `sendAt`".
+  localSendAt String?
+
+  /// The user asked to be reminded if nobody answers this (§9). Acted on after the
+  /// send succeeds, never before: a reminder for mail that never went out is noise.
+  expectsReply Boolean @default(false)
+
+  /// The message this is a reply to, for the RFC threading headers. A plain String
+  /// rather than a relation: it is read once at send time, and a cascade from
+  /// `Message` deleting a queued send would be the wrong behaviour.
+  parentMessageId String?
 
   status            ScheduleStatus @default(SCHEDULED)
   idempotencyKey    String         @unique
@@ -559,6 +581,10 @@ model FollowUpReminder {
   snoozedUntil     DateTime?
   status           ReminderStatus @default(PENDING)
   resolvedAt       DateTime?
+  /// When this reminder was last named in a digest email. The digest reads it to
+  /// avoid mailing the same overdue thread every morning, which is the fastest way
+  /// to teach a user to filter the digest away.
+  digestSentAt     DateTime?
 
   createdAt DateTime @default(now())
 
@@ -580,6 +606,9 @@ model UserSettings {
   defaultTone        ReplyTone @default(PROFESSIONAL)
   translationLang    String?
   followUpDays       Int       @default(3)
+  /// Opt-in, and off by default: this is the only feature in the application that
+  /// sends mail *to* the user, and it should be something they asked for.
+  followUpDigest     Boolean   @default(false)
   dailyAiCallCap     Int       @default(500)
   storeFullBodies    Boolean   @default(true)
 

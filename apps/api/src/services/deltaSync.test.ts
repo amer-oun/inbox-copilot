@@ -20,6 +20,16 @@ vi.mock("./sync.js", () => ({ persistThread, startBackfill }));
 const enqueueEnrichment = vi.hoisted(() => vi.fn());
 vi.mock("./ai/enrich.js", () => ({ enqueueEnrichment }));
 
+/**
+ * The follow-up check the delta runs after it commits inbound mail (§9).
+ *
+ * Mocked rather than exercised: what this file is responsible for is *calling* it at the
+ * right moment and never letting it fail a sync. What it actually decides is
+ * `followUps.test.ts`.
+ */
+const runFollowUpCheck = vi.hoisted(() => vi.fn());
+vi.mock("./followUps.js", () => ({ runFollowUpCheck }));
+
 const queueAdd = vi.hoisted(() => vi.fn());
 const queueGetJob = vi.hoisted(() => vi.fn());
 vi.mock("../lib/queues.js", () => ({
@@ -111,6 +121,9 @@ beforeEach(() => {
     messages: [rawMessage("m_1"), rawMessage("m_2")],
   });
   persistThread.mockReset().mockResolvedValue(["local_1", "local_2"]);
+  runFollowUpCheck
+    .mockReset()
+    .mockResolvedValue({ examined: 0, resolved: 0, triggered: 0, digestsSent: 0 });
   startBackfill.mockReset().mockResolvedValue({ enqueued: true, jobId: "backfill-mail_1" });
   enqueueEnrichment.mockReset().mockImplementation(({ messageIds }: { messageIds: string[] }) =>
     Promise.resolve(messageIds.length),
@@ -391,5 +404,69 @@ describe("enqueueDelta", () => {
 
     const result = await enqueueDelta({ userId: USER_ID, mailAccountId: ACCOUNT_ID });
     expect(result.queued).toBe(false);
+  });
+});
+
+describe("follow-up reminders and inbound mail", () => {
+  /*
+   * An inbound message on a thread the user is waiting on is the cancellation condition
+   * for a follow-up reminder (§9), and the delta is the earliest honest place to act on
+   * it: the messages have committed, so a check run now can see them.
+   *
+   * This is not an optimization. A reminder that lingers a quarter of an hour after the
+   * reply landed is a reminder the user reads as wrong — and at the digest's cadence it
+   * is an email chasing somebody who has already answered.
+   */
+
+  it("runs the check after writing inbound mail, scoped to this user", async () => {
+    await runDelta({ mailAccountId: ACCOUNT_ID, userId: USER_ID, reason: "webhook" });
+
+    expect(runFollowUpCheck).toHaveBeenCalledWith({ userId: USER_ID });
+  });
+
+  it("reports what it resolved", async () => {
+    runFollowUpCheck.mockResolvedValue({
+      examined: 2,
+      resolved: 1,
+      triggered: 0,
+      digestsSent: 0,
+    });
+
+    const result = await runDelta({
+      mailAccountId: ACCOUNT_ID,
+      userId: USER_ID,
+      reason: "webhook",
+    });
+
+    expect(result.remindersResolved).toBe(1);
+  });
+
+  it("does not run the check when nothing was written", async () => {
+    // No mail, nothing to resolve. The quarter-hourly job covers the rest.
+    syncDelta.mockResolvedValue({ changes: [], cursor: "2000" });
+
+    await runDelta({ mailAccountId: ACCOUNT_ID, userId: USER_ID, reason: "webhook" });
+
+    expect(runFollowUpCheck).not.toHaveBeenCalled();
+  });
+
+  it("never lets a failed check fail the sync", async () => {
+    /*
+     * The sync's job is mail. A reminder that resolves fifteen minutes late is a far
+     * smaller problem than a delta that reports failure — which would retry, re-read the
+     * mailbox, and hold the cursor back.
+     */
+    runFollowUpCheck.mockRejectedValue(new Error("db blip"));
+
+    const result = await runDelta({
+      mailAccountId: ACCOUNT_ID,
+      userId: USER_ID,
+      reason: "webhook",
+    });
+
+    expect(result.messages).toBeGreaterThan(0);
+    expect(result.remindersResolved).toBeUndefined();
+    // And the cursor still advanced: the delta succeeded.
+    expect(result.cursor).toBe("2000");
   });
 });

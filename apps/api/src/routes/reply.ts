@@ -58,12 +58,13 @@ replyRouter.post("/threads/:threadId/replies", async (req, res) => {
 replyRouter.post("/threads/:threadId/reply", async (req, res) => {
   const { id: userId } = currentUser(req);
   const { threadId } = threadIdParamsSchema.parse(req.params);
-  const { body, draftId } = sendReplyBodySchema.parse(req.body);
+  const { body, draftId, expectsReply } = sendReplyBodySchema.parse(req.body);
 
   const result = await sendReply({
     userId,
     threadId,
     body,
+    expectsReply,
     ...(draftId === undefined ? {} : { draftId }),
   });
 

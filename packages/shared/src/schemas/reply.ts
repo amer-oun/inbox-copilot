@@ -158,6 +158,15 @@ export type GenerateRepliesBody = z.infer<typeof generateRepliesBodySchema>;
 export const sendReplyBodySchema = z.object({
   body: z.string().min(1).max(100_000),
   draftId: cuidSchema.optional(),
+  /**
+   * Create a follow-up reminder for this message (§9).
+   *
+   * A boolean the user ticked, not a judgment: `AiClassification.needsReply` is the
+   * model's opinion about mail *arriving*, and using it to decide whether to chase
+   * somebody would be the application deciding who owes the user an answer. Default
+   * false — a reminder nobody asked for is a notification nobody wants.
+   */
+  expectsReply: z.boolean().default(false),
 });
 export type SendReplyBody = z.infer<typeof sendReplyBodySchema>;
 
@@ -169,6 +178,12 @@ export const sendResultSchema = z.object({
   usedDraftId: cuidSchema.nullable(),
   /** True when the sent text differed from that draft. */
   edited: z.boolean(),
+  /**
+   * The follow-up reminder this send created, when one was asked for and created.
+   * Null when it was not asked for, when the thread already had an open reminder, or
+   * when the bookkeeping failed after a successful send — the send is what matters.
+   */
+  reminderId: cuidSchema.nullable().default(null),
 });
 export type SendResultDto = z.infer<typeof sendResultSchema>;
 

@@ -18,6 +18,9 @@ export const QUEUE_NAMES = {
   aiStyle: "ai.style",
   syncDelta: "sync.delta",
   syncWatch: "sync.watch",
+  scheduleSend: "schedule.send",
+  scheduleSweep: "schedule.sweep",
+  followupCheck: "followup.check",
 } as const;
 
 /**
@@ -94,6 +97,39 @@ export const watchJobSchema = z.object({
 });
 export type WatchJob = z.infer<typeof watchJobSchema>;
 
+/**
+ * One scheduled send becoming due (§9).
+ *
+ * The payload is an id and nothing else — deliberately. The row is the source of
+ * truth: the subject, the body, the recipients and above all the *status* are read
+ * fresh at send time, so a job that Redis kept across a cancellation finds a
+ * CANCELLED row and does nothing. A job carrying the body would be a second copy of
+ * the mail, and the two could disagree about whether it should go.
+ */
+export const scheduleSendJobSchema = z.object({
+  scheduledEmailId: z.string().min(1),
+  userId: z.string().min(1),
+});
+export type ScheduleSendJob = z.infer<typeof scheduleSendJobSchema>;
+
+/**
+ * The sweeper §9 asks for: re-enqueue anything overdue, in case Redis lost a job.
+ *
+ * No payload — it always means "look for due sends". This is the half of the design
+ * that makes the DB row recoverable on its own: a flushed Redis, a delayed job lost
+ * to an eviction, or a scheduled send written while the worker was down all come back
+ * through one indexed query on `(status, sendAt)`.
+ */
+export const scheduleSweepJobSchema = z.object({});
+export type ScheduleSweepJob = z.infer<typeof scheduleSweepJobSchema>;
+
+/**
+ * The follow-up check (§9): resolve reminders whose thread got a reply, trigger the
+ * ones that are due, and mail the opt-in digest.
+ */
+export const followUpCheckJobSchema = z.object({});
+export type FollowUpCheckJob = z.infer<typeof followUpCheckJobSchema>;
+
 export const bullConnection: ConnectionOptions = {
   url: env.REDIS_URL,
   // BullMQ's blocking commands must never time out mid-wait.
@@ -157,6 +193,9 @@ let sweepQueue: Queue<AiSweepJob> | undefined;
 let styleQueue: Queue<AiStyleJob> | undefined;
 let deltaQueue: Queue<DeltaJob> | undefined;
 let watchQueue: Queue<WatchJob> | undefined;
+let scheduleQueue: Queue<ScheduleSendJob> | undefined;
+let scheduleSweeperQueue: Queue<ScheduleSweepJob> | undefined;
+let followupQueue: Queue<FollowUpCheckJob> | undefined;
 
 /** Lazily constructed: importing this module must not open a connection. */
 export function syncBackfillQueue(): Queue<BackfillJob> {
@@ -326,6 +365,115 @@ export async function scheduleWatchKeeper(): Promise<void> {
   );
 }
 
+/**
+ * Scheduled sends do **not** retry. One attempt, and that is the phase-6 rule about
+ * `sendMessage` carried into phase 10 unchanged: a 429 or a 502 from a send does not
+ * say whether the message went out, and a retry that guesses wrong sends the user's
+ * mail twice. A failed scheduled send lands in FAILED with the error on the row, and
+ * the user is told; the one thing it does not do is try again on its own.
+ *
+ * This is also why the sweeper only ever picks up SCHEDULED rows. A row left in
+ * SENDING is precisely the unknown-outcome case, and re-enqueueing it would be the
+ * automatic retry this comment exists to refuse.
+ */
+export const SCHEDULE_SEND_JOB_OPTIONS: JobsOptions = {
+  attempts: 1,
+  // Kept long enough that "why did my 9am send fail" is answerable from the queue as
+  // well as from the row.
+  removeOnComplete: { age: 24 * 3_600, count: 500 },
+  removeOnFail: { age: 30 * 24 * 3_600 },
+};
+
+export function scheduleSendQueue(): Queue<ScheduleSendJob> {
+  scheduleQueue ??= new Queue<ScheduleSendJob>(QUEUE_NAMES.scheduleSend, {
+    connection: bullConnection,
+    defaultJobOptions: SCHEDULE_SEND_JOB_OPTIONS,
+  });
+  return scheduleQueue;
+}
+
+/**
+ * One job per scheduled row, ever.
+ *
+ * The id is the dedup key, and here it guards against the sweeper: a row whose
+ * delayed job is still sitting in Redis gets swept, the enqueue lands on the same id,
+ * and nothing is duplicated. The database `idempotencyKey` is the backstop under
+ * that, for the case where the job really was lost and two arrive anyway.
+ */
+export function scheduleSendJobId(scheduledEmailId: string): string {
+  // No colon: BullMQ builds its own Redis keys with `:` as the separator.
+  return `schedsend-${scheduledEmailId}`;
+}
+
+export function scheduleSweepQueue(): Queue<ScheduleSweepJob> {
+  scheduleSweeperQueue ??= new Queue<ScheduleSweepJob>(QUEUE_NAMES.scheduleSweep, {
+    connection: bullConnection,
+    defaultJobOptions: {
+      // A missed sweep is not worth retrying: the next one is a minute away.
+      attempts: 1,
+      removeOnComplete: { age: 3_600, count: 60 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  return scheduleSweeperQueue;
+}
+
+/**
+ * How often the scheduled-send sweeper runs.
+ *
+ * Every minute, which is far more often than the other keepers in this app, and for a
+ * reason none of them share: this one is the *only* thing standing between a lost
+ * Redis job and mail that silently never goes out at a time the user chose. The cost
+ * is one query on the `(status, sendAt)` index, which finds nothing almost every time.
+ * A 9am send discovered at 9:01 is a working feature; one discovered at 10am is not.
+ */
+export const SCHEDULE_SWEEP_INTERVAL_MS = 60_000;
+
+export const SCHEDULE_SWEEP_SCHEDULER_ID = "schedule-sweep-every-1m";
+
+/** Registers the repeatable sweeper. Idempotent, like the AI sweep. */
+export async function scheduleSendSweeper(): Promise<void> {
+  await scheduleSweepQueue().upsertJobScheduler(
+    SCHEDULE_SWEEP_SCHEDULER_ID,
+    { every: SCHEDULE_SWEEP_INTERVAL_MS },
+    { name: "sweep", data: {} },
+  );
+}
+
+export function followUpCheckQueue(): Queue<FollowUpCheckJob> {
+  followupQueue ??= new Queue<FollowUpCheckJob>(QUEUE_NAMES.followupCheck, {
+    connection: bullConnection,
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: { age: 24 * 3_600, count: 50 },
+      removeOnFail: { age: 7 * 24 * 3_600 },
+    },
+  });
+  return followupQueue;
+}
+
+/**
+ * How often reminders are checked.
+ *
+ * Quarter-hourly, against a due date measured in days: the precision that matters is
+ * not when a reminder appears but how quickly one *disappears* after the reply lands,
+ * because a reminder to chase somebody who already answered is the failure mode that
+ * makes a user turn the feature off. The delta sync also queues a check when it writes
+ * inbound mail, so in practice a reply clears its reminder in seconds and this tick is
+ * the floor under that.
+ */
+export const FOLLOWUP_CHECK_INTERVAL_MS = 15 * 60_000;
+
+export const FOLLOWUP_CHECK_SCHEDULER_ID = "followup-check-every-15m";
+
+export async function scheduleFollowUpCheck(): Promise<void> {
+  await followUpCheckQueue().upsertJobScheduler(
+    FOLLOWUP_CHECK_SCHEDULER_ID,
+    { every: FOLLOWUP_CHECK_INTERVAL_MS },
+    { name: "check", data: {} },
+  );
+}
+
 export async function closeQueues(): Promise<void> {
   await Promise.all([
     backfillQueue?.close(),
@@ -334,6 +482,9 @@ export async function closeQueues(): Promise<void> {
     styleQueue?.close(),
     deltaQueue?.close(),
     watchQueue?.close(),
+    scheduleQueue?.close(),
+    scheduleSweeperQueue?.close(),
+    followupQueue?.close(),
   ]);
   backfillQueue = undefined;
   enrichQueue = undefined;
@@ -341,4 +492,7 @@ export async function closeQueues(): Promise<void> {
   styleQueue = undefined;
   deltaQueue = undefined;
   watchQueue = undefined;
+  scheduleQueue = undefined;
+  scheduleSweeperQueue = undefined;
+  followupQueue = undefined;
 }

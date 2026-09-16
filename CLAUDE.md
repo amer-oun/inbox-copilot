@@ -79,6 +79,10 @@ pnpm ai:sweep --force       # ignore the remaining daily cap budget
 pnpm ai:stub                # the stub on its own
 ```
 
+Phase 10 adds no scripts. The worker registers two more repeatable jobs on boot — the
+scheduled-send sweeper (every minute) and the follow-up check (every quarter hour) — and
+the digest stays silent until `RESEND_API_KEY` and `DIGEST_FROM_ADDRESS` are both set.
+
 Watch it land: `pnpm db:studio`, then `AiClassification`, `AiSummary`, `AiUsage`, and
 the denormalized `category`/`priority`/`priorityScore`/`language` on `Thread`.
 
@@ -398,7 +402,168 @@ Only `disconnectMailAccount` deletes a `MailAccount`, reachable only through
 via the web app's server action). Threads and messages go with it by cascade. If a mailbox
 is ever missing again, that table is the first place to look.
 
+## Scheduled send
+
+**The `ScheduledEmail` row is the source of truth and the BullMQ job is only a trigger**
+(§9). Everything in `services/schedule.ts` follows from that one sentence:
+
+- the job payload is an **id and a userId, nothing else**. Subject, body, recipients and
+  above all `status` are read fresh when it runs, so a job Redis kept across a
+  cancellation finds a CANCELLED row and does nothing. A payload carrying the body would
+  be a second copy of the mail, and the two could disagree about whether to send it;
+- **a lost job is not a lost send.** `sweepDueScheduledEmails` re-enqueues anything
+  overdue from one indexed query on `(status, sendAt)`, every minute. That interval is far
+  tighter than the other keepers in this app because it is the only thing between an
+  evicted Redis job and mail that silently never goes out at a time the user chose;
+- **two triggers cannot send twice.** The claim is a conditional `updateMany` from
+  SCHEDULED to SENDING; the loser sees `count === 0` and stops. `idempotencyKey` is the
+  unique constraint under that, and a SENT row can never be claimed again.
+
+**A failed send is never retried** — the phase-6 `sendMessage` rule, unchanged. The queue
+gives one attempt (`SCHEDULE_SEND_JOB_OPTIONS`), `runScheduledSend` writes FAILED and
+*returns* rather than throwing, and the sweeper only ever looks at SCHEDULED rows. A row
+left in SENDING is precisely the unknown-outcome case and is deliberately left alone: the
+provider may have accepted the message before the error, so a retry is a coin flip on
+whether somebody gets the user's mail twice. That is why `/scheduled` lists FAILED rows
+and says so — it is the only place the user finds out.
+
+Rule 1 survives the delay. `POST /scheduled/replies` carries the **body**, exactly like
+the immediate send; there is no route that takes a draft id and a time, and no flag on the
+drafting route that schedules its output. Recipients are computed from the parent message
+and *frozen onto the row* at schedule time — so a message arriving in the thread before
+the send cannot redirect a queued reply.
+
+### Timezones: store the zone, never the offset
+
+An offset is a fact about one moment; a zone is the rule. `ScheduledEmail` keeps
+**`localSendAt` (the wall clock the user picked) + `timezone` (IANA)**, and `sendAt` is a
+*derivation* of the two so the sweeper's index has instants to compare. When the trigger
+fires it re-resolves `localSendAt` in `timezone`: if the wall time has not arrived, it
+corrects `sendAt` and re-queues rather than sending an hour early. Without the pair there
+would be nothing to re-derive from, and a tz-database change would send mail at the wrong
+time with nothing recording that anything was lost.
+
+`lib/timezone.ts` does this with `Intl` and no library — the platform ships the tz
+database, and the one operation it lacks (wall clock → instant) is a two-pass fixed point
+over the one it has. Three things there are load-bearing:
+
+- **an offset is refused as a zone.** ICU happily accepts `timeZone: "+01:00"` and
+  resolves it to `"+01:00"`, so `isValidTimeZone` rejects anything whose *resolved* zone
+  starts with `+`/`-`. Without that check the whole rule above is decoration.
+- **spring forward** removes an hour, so `02:30` on that date does not exist. The fixed
+  point converges *before* the gap, which would send early; the round-trip check catches
+  that and returns the first guess, landing at `03:30`.
+- **fall back** repeats an hour, and `01:30` resolves to the earlier of the two.
+
+## Follow-up reminders
+
+Created by the **send path** when the user ticked "remind me" (`expectsReply` on the send
+or the schedule), never by a caller — there is no `POST /follow-ups`. A reminder a caller
+invented would name no message we know went out, so `followup.check` could never resolve
+it and it would sit there until dismissed by hand.
+
+`watchedMessageId` holds the **provider's** id and is not a foreign key, because at the
+moment a reminder is created the sent message has no `Message` row: the sync engine owns
+that table and the next delta brings it. So "has anybody replied" is judged against the
+reminder's own `createdAt` (with a minute of grace for clock skew) rather than against the
+watched message's `sentAt`.
+
+**The cancellation is the feature.** A reminder system's failure mode is not missing a
+reminder, it is nagging — one reminder to chase somebody who replied an hour ago teaches
+the user to ignore the list for ever. So:
+
+- `runFollowUpCheck` **resolves before it triggers**. A reminder whose reply arrived before
+  it came due must never appear as due, and the other order would show it for one tick —
+  which at the digest's cadence is an email chasing somebody who already answered;
+- **any inbound message on the thread counts**, taken literally as §9 words it. Not one
+  that threads on our `Message-ID`, not one from the original recipient: a colleague
+  answering from another address, an assistant replying for them, or a client that mangles
+  `In-Reply-To` all mean the user has heard back. Being generous occasionally clears a
+  reminder early; being strict means nagging;
+- **the delta sync runs the check** as soon as it commits inbound mail, so a reply clears
+  its reminder in seconds. The quarter-hourly job is the floor under that, not the
+  mechanism. It can never fail a sync;
+- one thread gets **one** open reminder. Sending three messages into a silent thread is one
+  act of chasing somebody.
+
+### Resend, and what it must never carry
+
+`lib/resend.ts` sends mail **from the application to its own user**, and today exactly one
+thing: the opt-in follow-up digest. **The user's own correspondence never goes through
+it.** That goes out through `MailProvider.sendMessage`, from their mailbox, with their
+authentication — a digest sent through their Gmail would appear in their Sent folder as
+something they wrote, and their mail sent through Resend would arrive from our domain,
+fail their recipients' DMARC alignment, and be invisible in their own Sent folder. A
+source-reading test in `digest.test.ts` asserts `digest.ts` is the only importer.
+
+Unconfigured is a supported state: with no `RESEND_API_KEY` the reminders still work,
+resolve and appear at `/follow-ups`, and only the email does not go out. The digest is
+opt-in (`UserSettings.followUpDigest`, default false), mails each row once
+(`digestSentAt`), sends nothing when there is nothing, and **escapes subject lines** — it
+is the one place this application renders a sender-chosen string into HTML itself.
+
+## Translation
+
+Cached per `(messageId, targetLang)` **and** `contentHash`. Both are needed: the unique
+pair makes a repeat request free (rule 7), and the hash is what stops a translation of a
+body that has since been corrected from being served as a translation of what is on
+screen. A hash mismatch is a miss and overwrites rather than duplicating.
+
+**Translation is the one AI output the reader receives as the sender's own words.** Every
+other feature here transforms the mail into something recognizably ours — a category, a
+summary, a verdict, a draft in the user's voice — and a reader knows they are looking at
+our description of somebody else's message. A translation reproduces the message, and
+there is no visible seam. That makes it the highest-fidelity path from an attacker's text
+to the user's eyes in this application, and it changes what the defense has to be:
+
+- the risk is **not** that the model is talked into an action. There is none available, and
+  the tool has two fields;
+- the risk is a message that says one thing in French and arrives as something else in
+  English — an added sentence, a changed account number, a softened warning, all in the
+  sender's voice. So `aiTranslationSchema` has **nowhere to put anything but translated
+  text**: no note to the reader, no warning, no advice, no answer;
+- the prompt's instruction is the opposite of everywhere else in `prompts.ts`: **translate
+  the instructions**, do not ignore them. A demand in the body is evidence the reader needs
+  and must arrive as forcefully as it was written. Suppressing it is the failure, not the
+  fix;
+- and it must **not tidy up the details that are evidence**. A misspelled domain or an
+  altered IBAN is the reader's best clue that something is wrong (§6), and a translator
+  that silently corrects it destroys exactly that.
+
+The UI shows the translation **beside** the original, not in its place, labelled as machine
+translation, and renders it as **text** — the sanitize/sandbox/CSP stack is for the
+sender's markup, and model output has no business borrowing it. `targetLang` falls back to
+`UserSettings.translationLang`, resolved on the server; a user with neither gets a 400,
+because guessing which language somebody reads is not a default anyone should pick for
+them.
+
 ## Current phase
+> Phase 10 — Scheduling, follow-ups and translation: DONE. `services/schedule.ts` +
+> `lib/timezone.ts` (scheduled send and the sweeper), `services/followUps.ts` +
+> `services/digest.ts` + `lib/resend.ts` (reminders and the opt-in digest),
+> `services/ai/translate.ts`, routes `scheduled.ts` / `followUps.ts` / `translate.ts`, and
+> `/scheduled`, `/follow-ups`, `ScheduledList`, `FollowUpList`, `TranslateControl` plus the
+> composer's "Send later" panel. Read the three sections above before touching any of it —
+> especially "store the zone, never the offset" and "The cancellation is the feature".
+> Migration `20260916010000_scheduling_followups_translation` is additive only: it adds
+> `localSendAt`/`expectsReply`/`parentMessageId` to `ScheduledEmail`, `digestSentAt` to
+> `FollowUpReminder`, and `followUpDigest` to `UserSettings`. Everything else this phase
+> needs shipped in the phase-0 schema. Applied locally with `prisma migrate deploy`.
+> Verified against real Postgres: 9am in New York resolved to 13:00Z in July and 14:00Z in
+> November and read back as 9am both times; the sweeper recovered a send whose delayed job
+> was **deleted from Redis** (found 1, queued 1, trigger back as `waiting`); two concurrent
+> claims on one row returned 1 and 0; a SENDING row was not swept; a second cancel was
+> refused; a reminder triggered, then an inbound message on the thread resolved it and the
+> due list went to zero; a duplicate reminder on the same thread was refused; another user
+> saw none of it; and the `(messageId, targetLang)` upsert updated rather than inserted
+> while a second language made a second row. Not verified: a real provider send on the
+> scheduled path (the probe exercises the claim, not Gmail), the real model's translation
+> quality (the stub answers it and says so), and a real Resend delivery.
+> Two bugs the tests caught in `lib/timezone.ts`, both of which would have shipped silently:
+> ICU accepts `"+01:00"` as a timeZone, which would have let an offset into the column the
+> §9 rule exists to keep a zone in; and the fixed point for a spring-forward wall time
+> converges an hour *before* the gap, which would have sent early.
+>
 > Phase 9 — Phishing and spam detection: DONE. `services/security/headers.ts` (layer 1),
 > `urls.ts` + `contacts.ts` (layer 2), `phishing.ts` (the rule table, the union, the model
 > call), `read.ts` and `appeals.ts` for the UI, `routes/threat.ts`, and
@@ -420,7 +585,7 @@ is ever missing again, that table is the first place to look.
 > `lib/requestId.ts`. Verified live against real Postgres — the audit rows survive the
 > cascade that removes the mailbox, a rolled-back disconnect leaves neither the delete nor
 > a phantom row, and another user sees none of it. See "The mailbox audit trail" above.
-> Next: Phase 8 — Outlook. The `MailProvider` port is the seam; Graph subscriptions replace
+> Next (still): Phase 8 — Outlook. The `MailProvider` port is the seam; Graph subscriptions replace
 > Gmail watches and `deltaLink` replaces the history id, behind the same interface. Layer 1
 > reads `authResults`, which `map.ts` fills per provider, so §6 needs no Outlook-specific
 > work beyond that parse.

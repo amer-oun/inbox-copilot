@@ -54,11 +54,18 @@ beforeEach(() => {
 
 describe("reads", () => {
   it("proxies the allowlisted paths", async () => {
-    for (const path of ["threads", `threads/${THREAD_ID}`, "writing-style"]) {
+    for (const path of [
+      "threads",
+      `threads/${THREAD_ID}`,
+      "writing-style",
+      // Phase 10.
+      "scheduled",
+      "follow-ups",
+    ]) {
       const response = await GET(get(path), params(path));
       expect(response.status).toBe(200);
     }
-    expect(apiFetch).toHaveBeenCalledTimes(3);
+    expect(apiFetch).toHaveBeenCalledTimes(5);
   });
 
   it("forwards only the query parameters the API has", async () => {
@@ -138,6 +145,49 @@ describe("writes", () => {
       `threads/${THREAD_ID}/threat`,
     ]) {
       const response = await POST(post(path, { level: "SAFE" }), params(path));
+      expect(response.status).toBe(404);
+    }
+
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("proxies scheduling, the follow-up actions and a translation", async () => {
+    const paths = [
+      "scheduled/replies",
+      "scheduled/messages",
+      `scheduled/${THREAD_ID}/cancel`,
+      `follow-ups/${THREAD_ID}/dismiss`,
+      `follow-ups/${THREAD_ID}/snooze`,
+      `messages/${MESSAGE_ID}/translate`,
+    ];
+
+    for (const path of paths) {
+      const response = await POST(post(path, { body: "ok" }), params(path));
+      expect(response.status).toBe(200);
+    }
+
+    expect(apiFetch).toHaveBeenCalledTimes(paths.length);
+  });
+
+  it("does not proxy a path that would schedule a stored draft", async () => {
+    /*
+     * Rule 1, held at the BFF as well as in the API's route space.
+     *
+     * Scheduling is the feature most likely to grow a "generate now, send at 9am"
+     * shortcut, because the delay makes it feel less like sending. The two paths that can
+     * put mail on the wire both carry the body, and asserting the absence here means the
+     * BFF cannot become the place a new one quietly appears.
+     */
+    for (const path of [
+      "scheduled/drafts",
+      `threads/${THREAD_ID}/schedule-draft`,
+      "scheduled/generate",
+      `scheduled/${THREAD_ID}/send`,
+    ]) {
+      const response = await POST(
+        post(path, { draftId: "d_1", sendAtLocal: "2026-09-17T09:00" }),
+        params(path),
+      );
       expect(response.status).toBe(404);
     }
 

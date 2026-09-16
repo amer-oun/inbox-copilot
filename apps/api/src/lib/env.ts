@@ -105,6 +105,20 @@ const envSchema = z.object({
    */
   GMAIL_WEBHOOK_DEV_TOKEN: z.string().default(""),
 
+  /**
+   * Resend API key, for the one thing this application mails a person about: the
+   * opt-in follow-up digest (§9). Empty is a supported state — reminders work, resolve
+   * and appear in the UI without it; only the email does not go out. It never carries
+   * the user's own correspondence (see lib/resend.ts).
+   */
+  RESEND_API_KEY: z.string().default(""),
+  /**
+   * The `From` for that digest. A verified sender on the Resend account, and
+   * obviously ours rather than the user's: mail from the application must look like
+   * it. Empty disables the digest just as an empty key does.
+   */
+  DIGEST_FROM_ADDRESS: z.union([z.literal(""), z.email()]).default(""),
+
   MICROSOFT_CLIENT_ID: z.string().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().default(""),
   /** "common" for multi-tenant + personal accounts; a GUID to lock to one tenant. */

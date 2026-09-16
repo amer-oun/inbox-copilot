@@ -144,6 +144,15 @@ export const threadDetailSchema = z.object({
    * paragraph.
    */
   threat: threatAssessmentSchema.nullable(),
+  /**
+   * The user's `UserSettings.translationLang` (§9), or null when they have not set one.
+   *
+   * On the thread contract rather than fetched separately by the language control, for
+   * the same reason `replyRecipients` is: the default the UI opens on must be the same
+   * fact the server will use when a request omits `targetLang`, and two places asking
+   * the question is two places that can disagree about it.
+   */
+  defaultTranslationLang: languageSchema.nullable(),
   /** Null when the thread was below the summarization threshold (§5). */
   summary: threadSummarySchema.nullable(),
   /** Oldest first — the order a person reads a conversation in. */

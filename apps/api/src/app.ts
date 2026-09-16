@@ -9,6 +9,9 @@ import { replyRouter } from "./routes/reply.js";
 import { webhooksRouter } from "./routes/webhooks.js";
 import { threadsRouter } from "./routes/threads.js";
 import { threatRouter } from "./routes/threat.js";
+import { scheduledRouter } from "./routes/scheduled.js";
+import { followUpsRouter } from "./routes/followUps.js";
+import { translateRouter } from "./routes/translate.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 
 export function createApp(): Express {
@@ -53,6 +56,9 @@ export function createApp(): Express {
   app.use(threadsRouter);
   app.use(replyRouter);
   app.use(threatRouter);
+  app.use(scheduledRouter);
+  app.use(followUpsRouter);
+  app.use(translateRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
