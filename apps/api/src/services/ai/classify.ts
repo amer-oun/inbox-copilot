@@ -33,12 +33,25 @@ const TOOL_DESCRIPTION =
  * mail is exactly what talks its way past a model with no header facts to check.
  *
  * So the columns are written honestly as "not assessed": UNKNOWN, not SAFE.
+ *
+ * **Every** threat column is reset, including the three phase 9 added — `threatIntent`,
+ * `threatExplanation`, `threatModel`. That matters because this runs on the *update* path
+ * of an upsert as well as the create: a re-classification (a corrected body, or
+ * `pnpm ai:sweep --force`) would otherwise leave a row reading UNKNOWN with the previous
+ * provider's intent, explanation and model still attached — a row claiming to be
+ * unassessed while naming who assessed it. The threat stage that runs moments later
+ * normally overwrites all of it; when that stage is rate-limited or fails, what survives
+ * has to be honest on its own, because "UNKNOWN means not assessed" is the invariant §6's
+ * whole sweep-and-retry loop is built on (`findUnassessedMessages`).
  */
 const THREAT_PLACEHOLDER = {
   threatLevel: "UNKNOWN",
   threatScore: 0,
   threatReasons: [] as string[],
   ruleSignals: {} as Record<string, never>,
+  threatIntent: null,
+  threatExplanation: null,
+  threatModel: null,
 } as const;
 
 /** The band a score falls in, per §5's anchors. */
@@ -77,6 +90,16 @@ export interface ClassifyInput {
   message: MessageForPrompt;
   settings?: AiSettings;
   signal?: AbortSignal;
+  /**
+   * Re-classify even when a row for this exact body already exists
+   * (`pnpm ai:sweep --force`).
+   *
+   * The one deliberate exception to rule 7, and it is an exception rather than a hole:
+   * rule 7 exists so that a cache *miss* is the only reason tokens are spent, and this
+   * is a caller saying the stored answer is not the answer it wants — typically because
+   * it was produced by a different provider. Nothing sets this by default.
+   */
+  ignoreCache?: boolean;
 }
 
 export interface ClassifyResult {
@@ -101,7 +124,12 @@ export interface ClassifyResult {
 export async function classifyMessage(input: ClassifyInput): Promise<ClassifyResult> {
   const { message } = input;
 
-  const cached = await cachedClassification(input.userId, message.id, message.contentHash);
+  // Not even looked up when the caller is recomputing: a lookup whose answer would be
+  // discarded is a query for nothing, and skipping it here keeps "we checked the cache
+  // and chose to ignore it" out of the ambiguous middle.
+  const cached = input.ignoreCache
+    ? null
+    : await cachedClassification(input.userId, message.id, message.contentHash);
   if (cached) {
     return {
       classification: {
@@ -146,6 +174,9 @@ export async function classifyMessage(input: ClassifyInput): Promise<ClassifyRes
     threatScore: THREAT_PLACEHOLDER.threatScore,
     threatReasons: THREAT_PLACEHOLDER.threatReasons as unknown as Prisma.InputJsonValue,
     ruleSignals: THREAT_PLACEHOLDER.ruleSignals as unknown as Prisma.InputJsonValue,
+    threatIntent: THREAT_PLACEHOLDER.threatIntent,
+    threatExplanation: THREAT_PLACEHOLDER.threatExplanation,
+    threatModel: THREAT_PLACEHOLDER.threatModel,
   };
 
   // Upsert, not create: `messageId` is unique, and a re-classification after the

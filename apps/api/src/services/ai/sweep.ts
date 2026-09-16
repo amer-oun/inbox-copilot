@@ -152,6 +152,87 @@ export async function findUnassessedMessages(input: {
   return rows as UnenrichedMessage[];
 }
 
+/**
+ * One message per thread that a recompute should re-summarize.
+ *
+ * Returned alongside the message list so the caller can mark exactly one job per thread
+ * with `resummarize`. Without it, forcing a five-message thread would pay for five
+ * identical thread summaries — the summary is a property of the thread, and one job can
+ * do it for all of them.
+ *
+ * The *newest* message of each thread is the one nominated, matching what the normal
+ * summary finder does: it is also the message whose classification the thread's
+ * denormalized columns reflect, so one job does both halves of the thread's work.
+ */
+export interface RecomputeWork {
+  messages: UnenrichedMessage[];
+  resummarizeIds: Set<string>;
+}
+
+/**
+ * Every message, newest first — whether or not it already has AI rows.
+ *
+ * This is the finder behind `pnpm ai:sweep --force`, and it is deliberately the opposite
+ * of the other three: they all exist to find *gaps*, and this one exists because there is
+ * no gap. Switching provider is the case that motivated it — a mailbox whose every row
+ * was written by a stubbed or previous model has nothing missing, so the ordinary sweep
+ * correctly reports zero, and the only way to re-assess it is to ask for the work by name.
+ *
+ * Outbound mail is included. Classification runs on it (that is how the user's own sent
+ * mail gets a language and a category); only the threat stage skips it, and it skips it
+ * itself.
+ */
+export async function findMessagesToRecompute(input: {
+  userId: string;
+  mailAccountId?: string;
+  limit?: number;
+}): Promise<RecomputeWork> {
+  const rows = await dbForUser(input.userId).message.findMany({
+    where: {
+      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+    },
+    orderBy: { sentAt: "desc" },
+    take: input.limit ?? SWEEP_USER_LIMIT,
+    select: { id: true, mailAccountId: true, threadId: true },
+  });
+
+  /*
+   * Newest first, so the first message seen for a thread is its newest — the same rule
+   * `findThreadsMissingSummaries` applies with `DISTINCT ON ... ORDER BY sentAt DESC`.
+   */
+  const resummarizeIds = new Set<string>();
+  const seenThreads = new Set<string>();
+  for (const row of rows) {
+    if (seenThreads.has(row.threadId)) continue;
+    seenThreads.add(row.threadId);
+    resummarizeIds.add(row.id);
+  }
+
+  return {
+    messages: rows.map((row) => ({ id: row.id, mailAccountId: row.mailAccountId })),
+    resummarizeIds,
+  };
+}
+
+/**
+ * Groups messages by mailbox.
+ *
+ * Because the enrich job carries a `mailAccountId`, and a user with two connected
+ * mailboxes must not have one's messages queued under the other's id — the tenancy read
+ * in `runEnrich` filters on both, so a mismatched pair silently finds nothing.
+ */
+function groupByMailbox(
+  messages: readonly UnenrichedMessage[],
+): Map<string, string[]> {
+  const byMailbox = new Map<string, string[]>();
+  for (const message of messages) {
+    const existing = byMailbox.get(message.mailAccountId);
+    if (existing) existing.push(message.id);
+    else byMailbox.set(message.mailAccountId, [message.id]);
+  }
+  return byMailbox;
+}
+
 export interface SweepResult {
   userId: string;
   found: number;
@@ -160,6 +241,10 @@ export interface SweepResult {
   skipped?: string;
   /** Calls the user has left in the current window, at sweep time. */
   budget?: number;
+  /** True when this sweep queued recomputes rather than filling gaps. */
+  recomputed?: boolean;
+  /** Recompute only: messages that exist beyond the ones this run could take. */
+  remaining?: number;
 }
 
 /**
@@ -176,8 +261,23 @@ export async function sweepUserEnrichment(input: {
   userId: string;
   mailAccountId?: string;
   limit?: number;
-  /** Ignore the remaining budget and queue up to `limit` anyway. */
-  force?: boolean;
+  /**
+   * Ignore the remaining daily budget and queue up to `limit` anyway.
+   *
+   * Named for what it does rather than "force": this file now has a second, unrelated
+   * override (`recompute`), and a single `force` covering both would make
+   * "re-assess my mailbox" silently mean "and ignore the spend limit too".
+   */
+  ignoreCap?: boolean;
+  /**
+   * Re-run messages that **already have** classifications, verdicts and summaries,
+   * replacing them (`pnpm ai:sweep --force`).
+   *
+   * This inverts what the sweep looks for. The three ordinary finders look for gaps; this
+   * one takes every message, because the case it exists for — a provider switch — leaves
+   * no gap to find.
+   */
+  recompute?: boolean;
 }): Promise<SweepResult> {
   const log = logger.child({ userId: input.userId });
   const settings = await loadAiSettings(input.userId);
@@ -189,15 +289,74 @@ export async function sweepUserEnrichment(input: {
   const cap = await checkDailyCap(input.userId, settings);
   const budget = Math.max(0, settings.dailyAiCallCap - cap.used);
 
-  if (!input.force && budget === 0) {
+  if (!input.ignoreCap && budget === 0) {
     log.info({ used: cap.used, cap: cap.cap }, "sweep skipped: no budget left today");
     return { userId: input.userId, found: 0, queued: 0, skipped: "cap", budget };
   }
 
   const limit = Math.min(
     input.limit ?? SWEEP_USER_LIMIT,
-    input.force ? Number.MAX_SAFE_INTEGER : budget,
+    input.ignoreCap ? Number.MAX_SAFE_INTEGER : budget,
   );
+
+  /*
+   * The recompute path returns early: it does not run the three gap finders at all.
+   *
+   * Mixing them would be wrong rather than merely wasteful — "every message" is a
+   * superset of "messages with no classification", so the gap finders would contribute
+   * nothing but duplicates, and the budget arithmetic that shares `limit` between three
+   * finders has no meaning when one of them wants everything.
+   */
+  if (input.recompute) {
+    const work = await findMessagesToRecompute({
+      userId: input.userId,
+      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      limit,
+    });
+
+    if (work.messages.length === 0) {
+      return { userId: input.userId, found: 0, queued: 0, budget, recomputed: true };
+    }
+
+    // How much is left over, so the caller can say "run it again" rather than leaving the
+    // user to wonder why only part of the mailbox changed.
+    const total = await dbForUser(input.userId).message.count({
+      where: {
+        ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      },
+    });
+
+    let queued = 0;
+    for (const [mailAccountId, messageIds] of groupByMailbox(work.messages)) {
+      queued += await enqueueEnrichment({
+        userId: input.userId,
+        mailAccountId,
+        messageIds,
+        ignoreCache: true,
+        resummarizeIds: work.resummarizeIds,
+      });
+    }
+
+    log.info(
+      {
+        found: work.messages.length,
+        queued,
+        threads: work.resummarizeIds.size,
+        budget,
+        total,
+      },
+      "queued messages for recomputation",
+    );
+
+    return {
+      userId: input.userId,
+      found: work.messages.length,
+      queued,
+      budget,
+      recomputed: true,
+      remaining: Math.max(0, total - work.messages.length),
+    };
+  }
 
   const unclassified = await findUnenrichedMessages({
     userId: input.userId,
@@ -250,17 +409,7 @@ export async function sweepUserEnrichment(input: {
     return { userId: input.userId, found: 0, queued: 0, budget };
   }
 
-  /*
-   * Grouped by mailbox because the enrich job carries a mailAccountId, and a user
-   * with two connected mailboxes must not have one's messages queued under the
-   * other's id — the tenancy read in `runEnrich` filters on both.
-   */
-  const byMailbox = new Map<string, string[]>();
-  for (const message of messages) {
-    const existing = byMailbox.get(message.mailAccountId);
-    if (existing) existing.push(message.id);
-    else byMailbox.set(message.mailAccountId, [message.id]);
-  }
+  const byMailbox = groupByMailbox(messages);
 
   let queued = 0;
   for (const [mailAccountId, messageIds] of byMailbox) {

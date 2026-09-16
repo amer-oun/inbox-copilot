@@ -202,10 +202,12 @@ describe("sweepUserEnrichment", () => {
     expect(enqueueEnrichment).not.toHaveBeenCalled();
   });
 
-  it("ignores the budget when forced", async () => {
+  it("ignores the budget when told to", async () => {
     usageCount.mockResolvedValue(500);
 
-    const result = await sweepUserEnrichment({ userId: USER_ID, force: true, limit: 50 });
+    // Renamed from `force`, which now means "recompute cached rows" — two unrelated
+    // overrides should not share one name.
+    const result = await sweepUserEnrichment({ userId: USER_ID, ignoreCap: true, limit: 50 });
 
     expect(result.queued).toBe(3);
     expect(messageFindMany.mock.calls[0]?.[0].take).toBe(50);

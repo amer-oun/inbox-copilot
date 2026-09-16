@@ -92,9 +92,14 @@ pnpm dev                    # api + worker + ai stub (port AI_STUB_PORT, default
 pnpm ai:sweep               # enqueue every message that has no classification
 pnpm ai:sweep --limit=10    # ...at most 10 per user
 pnpm ai:sweep --email=you@example.com
-pnpm ai:sweep --force       # ignore the remaining daily cap budget
+pnpm ai:sweep --ignore-cap  # ignore the remaining daily cap budget
+pnpm ai:sweep --email=you@example.com --force   # re-run messages that ALREADY have rows
 pnpm ai:stub                # the stub on its own
 ```
+
+**`--force` used to mean `--ignore-cap`, and now means "recompute".** The two overrides are
+unrelated, and one flag covering both would make "re-assess my mailbox" quietly also mean
+"and ignore the spend limit".
 
 Phase 10 adds no scripts. The worker registers two more repeatable jobs on boot — the
 scheduled-send sweeper (every minute) and the follow-up check (every quarter hour) — and
@@ -240,6 +245,74 @@ cap of 10 measured 14 calls; at the default 500 the overshoot is noise). The cap
 inside every call is the hard stop.
 
 It runs every 30 minutes on the worker and on demand via `pnpm ai:sweep`.
+
+## Re-running enrichment that already succeeded
+
+`pnpm ai:sweep --email=you@example.com --force`.
+
+The ordinary sweep looks for **gaps** and finds nothing once a mailbox is fully enriched —
+which is the correct answer and an unhelpful one after switching provider. Every message has
+a classification, every thread over the threshold has a summary, and every row was written
+by the dev stub or by whatever ran before. Rule 7 is working exactly as designed: it serves
+a cached answer, and the answer is simply not the one anybody wants any more.
+
+So `--force` inverts what the sweep looks for. `findMessagesToRecompute` takes **every**
+message — no `NOT EXISTS`, no `classification: { is: null }` — bypasses the content-hash
+cache at all three stages, and **replaces** the rows. It requires `--email`: a recompute
+costs a model call per message and overwrites rows, so "every user in the database" is not
+something to do by accident. The script prints which provider is about to write the new
+rows before it starts.
+
+### What the flag reaches, and what it must not
+
+`ignoreCache` is threaded through the job payload to `classifyMessage`,
+`assessMessageThreat` and `summarizeThread`, where each skips its **own** lookup rather than
+looking it up and discarding the answer. It is **absent by default** — not false — so an
+ordinary job's payload is byte-for-byte what it has always been, and rule 7 still holds for
+the sync engine, the scheduled sweep, and a job written by a previous deploy.
+
+Three collisions to keep straight, all of which existed before this feature and none of
+which should share a name:
+
+| name | means |
+|---|---|
+| `--ignore-cap` / `sweepUserEnrichment({ ignoreCap })` | ignore the remaining daily budget |
+| `--force` / `sweepUserEnrichment({ recompute })` | re-run rows that already exist |
+| `summarizeThread({ force })` | ignore the §5 "is this thread worth summarizing" threshold |
+
+`summarizeThread` takes both `force` and `ignoreCache`, and a caller can want either without
+the other: recomputing a stored summary does not mean the threshold should be ignored, and
+summarizing a two-line thread on request does not mean a stored answer is unwanted.
+
+### Two things a recompute has to get right
+
+**One summary per thread, not one per message.** A summary is a property of the *thread*, so
+if every message carried "resummarize" a forced sweep would pay for five identical summaries
+of a five-message thread. The sweep nominates the **newest message of each thread** and only
+that job re-summarizes — a second payload field, `resummarize`, separate from `ignoreCache`.
+Measured on the real mailbox: 63 messages, 61 thread leaders.
+
+**A pending plain job must not satisfy a forced enqueue.** The job id dedupes pending work,
+which is normally exactly right — but a plain job standing in front of a forced one satisfies
+the id, runs, serves the cache, and the recompute silently never happens. So a forced enqueue
+*replaces* a pending plain job. An `active` one is left alone: it cannot be removed, and a
+second job for the same message would race the first onto the same rows.
+
+### Expect it to be interrupted, and expect that to be fine
+
+On a free tier, rate limiting is the normal weather. Re-running this mailbox produced 265
+rate-limit errors and finished 63 of 63 classifications and 61 of 61 summaries, but left 18
+threat verdicts unassessed — the threat stage failing is caught per message and never fails
+the job (§6).
+
+That is recoverable **without** `--force`, and by design: a message whose threat stage did not
+finish is left at UNKNOWN, which is precisely what `findUnassessedMessages` looks for. So a
+plain `pnpm ai:sweep` afterwards found exactly those 18 and finished them. "UNKNOWN means not
+assessed" is the invariant the whole retry loop rests on — which is why `THREAT_PLACEHOLDER`
+in `classify.ts` clears **every** threat column including `threatIntent`,
+`threatExplanation` and `threatModel`. Before that it did not, and a re-classified row read
+UNKNOWN while still naming the previous provider and carrying its explanation. Running the
+recompute for real is what surfaced it.
 
 ## Rendering email HTML
 
@@ -728,4 +801,18 @@ them.
 > → MAX_TOKENS), which would have failed every threat assessment.
 > Not verified: Anthropic and Gemini answering the *same* mailbox comparably — the tiers
 > are deliberately not equivalent models, and `GEMINI_MODELS` says so.
+>
+> Also in this phase: `pnpm ai:sweep --force` (see "Re-running enrichment that already
+> succeeded"), which exists because a provider switch leaves no gap for the ordinary sweep
+> to find. `--force` was previously the cap override, now `--ignore-cap`.
+> Verified on the real mailbox: the ordinary sweep reported `found 0` (the reported
+> complaint), then `--force` queued 63 messages and 61 thread leaders and re-wrote every row
+> — 63/63 classifications on `gemini-3.1-flash-lite`, 63/63 threat verdicts on
+> `gemini-3.5-flash-lite`, 47/47 summaries on `gemini-3.5-flash-lite`, with row counts
+> unchanged at 63 and 47 (replaced, not duplicated) and zero `[stubbed …]` strings left.
+> Free-tier rate limiting interrupted it: 265 rate-limit errors, 18 threat verdicts left
+> UNKNOWN, which a plain `pnpm ai:sweep` then found and finished — the §6 retry loop working
+> as designed. That run also surfaced a real bug it made routine: `THREAT_PLACEHOLDER` did
+> not clear the three columns phase 9 added, so a re-classified row read UNKNOWN while still
+> naming the previous provider. Fixed and tested.
 > Update this line as we progress.

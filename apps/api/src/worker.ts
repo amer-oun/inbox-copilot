@@ -159,7 +159,21 @@ async function processEnrich(job: Job<AiEnrichJob>): Promise<void> {
   inFlight.set(key, controller);
 
   try {
-    const result = await runEnrich(payload, { signal: controller.signal });
+    /*
+     * Spread rather than passed straight through: `exactOptionalPropertyTypes` draws a
+     * distinction between "absent" and "present and undefined", and the recompute flags
+     * must be genuinely absent on an ordinary job so `EnrichInput` sees the default.
+     */
+    const result = await runEnrich(
+      {
+        messageId: payload.messageId,
+        mailAccountId: payload.mailAccountId,
+        userId: payload.userId,
+        ...(payload.ignoreCache === true ? { ignoreCache: true } : {}),
+        ...(payload.resummarize === true ? { resummarize: true } : {}),
+      },
+      { signal: controller.signal },
+    );
     if (result.skipped.length > 0) {
       log.debug({ jobId: job.id, skipped: result.skipped }, "enrich skipped work");
     }

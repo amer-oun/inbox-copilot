@@ -41,11 +41,28 @@ export type BackfillJob = z.infer<typeof backfillJobSchema>;
 /**
  * One message to enrich. The mailbox id rides along so log lines and the tenancy
  * check have it without a second query.
+ *
+ * The two recompute flags are how `pnpm ai:sweep --force` reaches the worker. They are
+ * **opt-in and absent by default**, so a job written by the sync engine, by a previous
+ * deploy, or by the scheduled sweep behaves exactly as it always has — the content-hash
+ * cache is checked and a cached answer is free (rule 7). Only a job that explicitly says
+ * otherwise spends tokens on a message that already has rows.
+ *
+ * Two flags rather than one because the two caches have different shapes. Classification
+ * and threat assessment are per *message*, so re-running them is one call each for the
+ * message in hand. A summary is per *thread*, shared by every message in it — so if every
+ * message of a five-message thread carried "resummarize", one forced sweep would pay for
+ * five identical summaries. The sweep therefore sets `resummarize` on the newest message
+ * of each thread only, and that one job re-summarizes the whole thread.
  */
 export const aiEnrichJobSchema = z.object({
   messageId: z.string().min(1),
   mailAccountId: z.string().min(1),
   userId: z.string().min(1),
+  /** Re-run classification and threat assessment even if this message has rows. */
+  ignoreCache: z.boolean().optional(),
+  /** Also re-run this message's thread summary. Set for one message per thread. */
+  resummarize: z.boolean().optional(),
 });
 export type AiEnrichJob = z.infer<typeof aiEnrichJobSchema>;
 

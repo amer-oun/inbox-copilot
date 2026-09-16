@@ -57,6 +57,16 @@ export interface SummarizeInput {
   signal?: AbortSignal;
   /** Skips the §5 threshold — for a user explicitly asking for a summary. */
   force?: boolean;
+  /**
+   * Re-summarize even when a summary of this exact thread state exists
+   * (`pnpm ai:sweep --force`).
+   *
+   * Deliberately **not** the same flag as `force` above, which answers "is this thread
+   * worth summarizing at all". A caller can want either without the other: re-doing a
+   * stored summary with a new provider does not mean the threshold should be ignored, and
+   * summarizing a two-line thread on request does not mean a stored answer is unwanted.
+   */
+  ignoreCache?: boolean;
 }
 
 export interface SummarizeResult {
@@ -84,7 +94,9 @@ export async function summarizeThread(input: SummarizeInput): Promise<SummarizeR
 
   const contentHash = threadContentHash(input.messages.map((message) => message.contentHash));
 
-  const hit = await cachedSummary(input.userId, input.threadId, contentHash);
+  const hit = input.ignoreCache
+    ? null
+    : await cachedSummary(input.userId, input.threadId, contentHash);
   if (hit) return asCacheHit(hit);
 
   /*
@@ -97,7 +109,19 @@ export async function summarizeThread(input: SummarizeInput): Promise<SummarizeR
     return await withMutex(
       summaryLockKey(input.threadId, contentHash),
       async () => {
-        const raced = await cachedSummary(input.userId, input.threadId, contentHash);
+        /*
+         * The race check, and it is skipped when recomputing — otherwise a forced
+         * re-summarization would find the very row it was asked to replace and report a
+         * cache hit. The lock is still taken: it serializes two forced jobs for one
+         * thread into two sequential calls onto one row rather than a race for it.
+         *
+         * Sequential rather than deduplicated is the accepted cost of forcing, and it is
+         * bounded at one call per *thread* because the sweep sets `resummarize` on a
+         * single message per thread (see `aiEnrichJobSchema`).
+         */
+        const raced = input.ignoreCache
+          ? null
+          : await cachedSummary(input.userId, input.threadId, contentHash);
         if (raced) {
           logger.debug(
             { userId: input.userId, threadId: input.threadId },
@@ -125,7 +149,9 @@ export async function summarizeThread(input: SummarizeInput): Promise<SummarizeR
       { userId: input.userId, threadId: input.threadId },
       "summary lock timed out; summarizing without it",
     );
-    const late = await cachedSummary(input.userId, input.threadId, contentHash);
+    const late = input.ignoreCache
+      ? null
+      : await cachedSummary(input.userId, input.threadId, contentHash);
     return late ? asCacheHit(late) : summarizeUncached(input, contentHash);
   }
 }

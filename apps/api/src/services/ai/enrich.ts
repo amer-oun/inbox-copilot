@@ -30,6 +30,21 @@ export interface EnrichInput {
   userId: string;
   mailAccountId: string;
   messageId: string;
+  /**
+   * Re-run classification and threat assessment for this message even though it already
+   * has rows, replacing them (`pnpm ai:sweep --force`).
+   *
+   * Absent by default, which is what keeps rule 7 true for every other caller: the sync
+   * engine, the scheduled sweep and a job written by a previous deploy all leave it unset
+   * and get the cached answer for free.
+   */
+  ignoreCache?: boolean;
+  /**
+   * Also re-summarize this message's thread. Set for **one** message per thread, because
+   * a summary is a property of the thread rather than of the message — see
+   * `aiEnrichJobSchema`.
+   */
+  resummarize?: boolean;
 }
 
 export interface EnrichHooks {
@@ -155,6 +170,7 @@ export async function runEnrich(
         mailboxAddress,
         message,
         settings,
+        ...(input.ignoreCache ? { ignoreCache: true } : {}),
         ...(hooks.signal ? { signal: hooks.signal } : {}),
       });
 
@@ -207,6 +223,7 @@ export async function runEnrich(
             mailboxAddress,
             message: threatMessage,
             settings,
+            ...(input.ignoreCache ? { ignoreCache: true } : {}),
             ...(hooks.signal ? { signal: hooks.signal } : {}),
           });
 
@@ -236,6 +253,10 @@ export async function runEnrich(
         mailboxAddress,
         messages,
         settings,
+        // `resummarize`, not `ignoreCache`: only the one job per thread that the sweep
+        // nominated re-does the summary, so forcing a five-message thread costs one
+        // summary call rather than five.
+        ...(input.resummarize ? { ignoreCache: true } : {}),
         ...(hooks.signal ? { signal: hooks.signal } : {}),
       });
 
@@ -272,6 +293,11 @@ export async function runEnrich(
       summarized: result.summarized,
       threatLevel: result.threatLevel,
       skipped: result.skipped,
+      // Recorded because a recompute is the one kind of enrichment that *replaces*
+      // existing rows, and "why did this message's category change overnight" should be
+      // answerable from the log.
+      ...(input.ignoreCache ? { recomputed: true } : {}),
+      ...(input.resummarize ? { resummarized: true } : {}),
     },
     "message enriched",
   );
@@ -303,6 +329,14 @@ export async function enqueueEnrichment(input: {
   userId: string;
   mailAccountId: string;
   messageIds: readonly string[];
+  /** Re-run classification and threat for these messages (`pnpm ai:sweep --force`). */
+  ignoreCache?: boolean;
+  /**
+   * The subset of `messageIds` that should also re-summarize their thread — one message
+   * per thread. A message not in this set still gets the summary *cache*, so a forced
+   * sweep pays for one summary per thread rather than one per message.
+   */
+  resummarizeIds?: ReadonlySet<string>;
 }): Promise<number> {
   if (input.messageIds.length === 0) return 0;
 
@@ -319,12 +353,32 @@ export async function enqueueEnrichment(input: {
 
       if (existing) {
         const state = await existing.getState();
-        if (state === "waiting" || state === "active" || state === "delayed") {
-          // Already going to happen; adding it again would be a no-op anyway.
+
+        /*
+         * Whether the job holding this id will do what we are asking for.
+         *
+         * A pending job normally makes a second enqueue unnecessary — that is the whole
+         * point of the id. The exception is a *plain* job standing in front of a forced
+         * one: it satisfies the id, then runs, then serves the cached answer, and the
+         * recompute silently never happens. So that is the one case where a pending job is
+         * replaced rather than joined.
+         */
+        const alreadyDoingTheWork =
+          input.ignoreCache !== true || existing.data?.ignoreCache === true;
+
+        const keepIt =
+          // Active: being worked on right now. It cannot be removed, and a second job for
+          // the same message would race the first onto the same rows.
+          state === "active" ||
+          ((state === "waiting" || state === "delayed") && alreadyDoingTheWork);
+
+        if (keepIt) {
           pending += 1;
           continue;
         }
-        // Completed or failed: the id is stale and is holding the slot.
+
+        // Stale (completed or failed) and holding the slot, or a plain job in the way of a
+        // recompute. Either way it goes.
         try {
           await existing.remove();
         } catch (error) {
@@ -342,6 +396,10 @@ export async function enqueueEnrichment(input: {
           messageId,
           mailAccountId: input.mailAccountId,
           userId: input.userId,
+          // Omitted rather than set false when not recomputing, so an ordinary job's
+          // payload is byte-for-byte what it has always been.
+          ...(input.ignoreCache === true ? { ignoreCache: true } : {}),
+          ...(input.resummarizeIds?.has(messageId) === true ? { resummarize: true } : {}),
         } satisfies AiEnrichJob,
         opts: { jobId },
       });

@@ -486,3 +486,178 @@ describe("enqueueEnrichment", () => {
     ).resolves.toBe(0);
   });
 });
+
+describe("enqueueEnrichment and the recompute flags", () => {
+  /*
+   * The job id dedupes *pending* work, which is normally exactly right. A recompute is the
+   * one case where "already queued" is not good enough: a plain job standing in front of a
+   * forced one satisfies the id, runs, serves the cached answer, and the recompute silently
+   * never happens.
+   */
+
+  it("omits the flags entirely for an ordinary enqueue", async () => {
+    /*
+     * Not `false` — absent. An ordinary job's payload stays byte-for-byte what it has
+     * always been, which is how rule 7 keeps holding for the sync engine and the scheduled
+     * sweep after this feature exists.
+     */
+    await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["m_1"],
+    });
+
+    const data = addBulk.mock.calls[0]?.[0][0].data;
+    expect(data).toEqual({
+      messageId: "m_1",
+      mailAccountId: MAIL_ACCOUNT_ID,
+      userId: USER_ID,
+    });
+    expect("ignoreCache" in data).toBe(false);
+    expect("resummarize" in data).toBe(false);
+  });
+
+  it("marks the forced messages and only the nominated thread leaders", async () => {
+    await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["m_newest", "m_older"],
+      ignoreCache: true,
+      resummarizeIds: new Set(["m_newest"]),
+    });
+
+    const jobs = addBulk.mock.calls[0]?.[0] as { data: Record<string, unknown> }[];
+    expect(jobs[0]?.data).toMatchObject({ messageId: "m_newest", ignoreCache: true, resummarize: true });
+    // Same thread, so it re-classifies but does not pay for a second identical summary.
+    expect(jobs[1]?.data).toMatchObject({ messageId: "m_older", ignoreCache: true });
+    expect("resummarize" in (jobs[1]?.data ?? {})).toBe(false);
+  });
+
+  it("replaces a pending plain job when the enqueue is forced", async () => {
+    const remove = vi.fn();
+    getJob.mockResolvedValue({
+      getState: async () => "waiting",
+      data: { messageId: "m_1", mailAccountId: MAIL_ACCOUNT_ID, userId: USER_ID },
+      remove,
+    });
+
+    const queued = await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["m_1"],
+      ignoreCache: true,
+    });
+
+    // Removed and re-added, because the queued job would have served the cache.
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(queued).toBe(1);
+    expect(addBulk.mock.calls[0]?.[0][0].data.ignoreCache).toBe(true);
+  });
+
+  it("leaves a pending job that is already forced alone", async () => {
+    // Same work, already queued. Replacing it would be churn for nothing.
+    const remove = vi.fn();
+    getJob.mockResolvedValue({
+      getState: async () => "waiting",
+      data: { messageId: "m_1", mailAccountId: MAIL_ACCOUNT_ID, userId: USER_ID, ignoreCache: true },
+      remove,
+    });
+
+    const queued = await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["m_1"],
+      ignoreCache: true,
+    });
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(queued).toBe(0);
+  });
+
+  it("never disturbs an active job, even for a recompute", async () => {
+    /*
+     * It cannot be removed while a worker holds it, and a second job for the same message
+     * would race the first onto the same rows. The sweep can be run again afterwards.
+     */
+    const remove = vi.fn();
+    getJob.mockResolvedValue({
+      getState: async () => "active",
+      data: { messageId: "m_1", mailAccountId: MAIL_ACCOUNT_ID, userId: USER_ID },
+      remove,
+    });
+
+    const queued = await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["m_1"],
+      ignoreCache: true,
+    });
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(queued).toBe(0);
+  });
+
+  it("still collapses an ordinary enqueue onto a pending plain job", async () => {
+    // The original behaviour, unchanged: this is the dedupe the job id exists for.
+    const remove = vi.fn();
+    getJob.mockResolvedValue({
+      getState: async () => "waiting",
+      data: { messageId: "m_1", mailAccountId: MAIL_ACCOUNT_ID, userId: USER_ID },
+      remove,
+    });
+
+    const queued = await enqueueEnrichment({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageIds: ["m_1"],
+    });
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(queued).toBe(0);
+  });
+});
+
+describe("runEnrich passes the recompute flags to the right stages", () => {
+  it("bypasses the classification and threat caches but not the summary's", async () => {
+    /*
+     * `ignoreCache` without `resummarize`: this message is not its thread's nominated
+     * leader, so it re-classifies and re-assesses itself and lets the thread summary come
+     * from the cache. That asymmetry is what makes forcing a five-message thread cost one
+     * summary rather than five.
+     */
+    await runEnrich({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageId: JOB.messageId,
+      ignoreCache: true,
+    });
+
+    expect(classifyMessage.mock.calls[0]?.[0].ignoreCache).toBe(true);
+    expect(assessMessageThreat.mock.calls[0]?.[0].ignoreCache).toBe(true);
+    expect(summarizeThread.mock.calls[0]?.[0].ignoreCache).toBeUndefined();
+  });
+
+  it("bypasses the summary cache for the nominated message", async () => {
+    await runEnrich({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageId: JOB.messageId,
+      ignoreCache: true,
+      resummarize: true,
+    });
+
+    expect(summarizeThread.mock.calls[0]?.[0].ignoreCache).toBe(true);
+  });
+
+  it("passes nothing when the job is an ordinary one", async () => {
+    await runEnrich({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      messageId: JOB.messageId,
+    });
+
+    expect(classifyMessage.mock.calls[0]?.[0].ignoreCache).toBeUndefined();
+    expect(assessMessageThreat.mock.calls[0]?.[0].ignoreCache).toBeUndefined();
+    expect(summarizeThread.mock.calls[0]?.[0].ignoreCache).toBeUndefined();
+  });
+});

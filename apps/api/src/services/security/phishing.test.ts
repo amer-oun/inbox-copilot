@@ -495,12 +495,16 @@ function message(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function assess(overrides: Record<string, unknown> = {}) {
+function assess(
+  overrides: Record<string, unknown> = {},
+  options: { ignoreCache?: boolean } = {},
+) {
   return assessMessageThreat({
     userId: USER_ID,
     mailAccountId: MAIL_ACCOUNT_ID,
     mailboxAddress: MAILBOX,
     message: message(overrides) as Parameters<typeof assessMessageThreat>[0]["message"],
+    ...(options.ignoreCache === true ? { ignoreCache: true } : {}),
   });
 }
 
@@ -878,5 +882,65 @@ describe("refreshThreadThreatLevel", () => {
   it("stays UNKNOWN for a thread nothing has assessed", async () => {
     classificationFindMany.mockResolvedValue([]);
     expect(await refreshThreadThreatLevel(USER_ID, "thread_1")).toBe("UNKNOWN");
+  });
+});
+
+describe("re-assessing a message that already has a verdict", () => {
+  /*
+   * `pnpm ai:sweep --force`, at this layer. The motivating case: every verdict in the
+   * mailbox was written by the dev stub, which deliberately always answers SAFE — so
+   * nothing is missing, the cache is working as designed, and the stored reading is simply
+   * not one anybody wants to keep.
+   */
+
+  it("does not consult the stored verdict", async () => {
+    // A cached row that would otherwise be served, exactly as the "reuses a stored
+    // verdict" test above sets up.
+    classificationFindFirst.mockResolvedValue({
+      threatLevel: "SAFE",
+      threatIntent: "BENIGN_MARKETING",
+      threatExplanation: "[stubbed assessment] …",
+      threatModel: "claude-sonnet-5",
+      ruleSignals: { fingerprint: "whatever-it-was" },
+    });
+
+    const result = await assess({}, { ignoreCache: true });
+
+    expect(classificationFindFirst).not.toHaveBeenCalled();
+    expect(result.fromCache).toBe(false);
+    // The model actually ran, and the row is rewritten with what it said.
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(classificationUpsert).toHaveBeenCalled();
+  });
+
+  it("still recomputes layers 1 and 2, which never came from a cache anyway", async () => {
+    /*
+     * The deterministic layers are re-derived on every call regardless of this flag — they
+     * cost no tokens. So what forcing actually buys is a fresh *interpretation* of evidence
+     * that was going to be gathered either way, which is precisely what a provider switch
+     * calls for: the rules say the same thing, and only the reading of them is new.
+     */
+    const forced = await assess({}, { ignoreCache: true });
+    const plain = await assess();
+
+    expect(forced.rules.fingerprint).toBe(plain.rules.fingerprint);
+    expect(forced.rules.score).toBe(plain.rules.score);
+  });
+
+  it("leaves the cache in place for an ordinary call", async () => {
+    // Rule 7 unchanged for every caller that does not ask.
+    classificationFindFirst.mockResolvedValue({
+      threatLevel: "SAFE",
+      threatIntent: "BENIGN_MARKETING",
+      threatExplanation: "stored",
+      threatModel: "claude-sonnet-5",
+      ruleSignals: { fingerprint: (await assess()).rules.fingerprint },
+    });
+
+    create.mockClear();
+    const result = await assess();
+
+    expect(result.fromCache).toBe(true);
+    expect(create).not.toHaveBeenCalled();
   });
 });

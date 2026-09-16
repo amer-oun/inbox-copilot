@@ -588,6 +588,16 @@ export interface AssessThreatInput {
   message: MessageForThreat;
   settings?: AiSettings;
   signal?: AbortSignal;
+  /**
+   * Re-assess even when a verdict for this body *and* these signals exists
+   * (`pnpm ai:sweep --force`).
+   *
+   * Only layer 3 is affected. Layers 1 and 2 are recomputed on every call regardless —
+   * they cost nothing — so this flag buys a fresh *interpretation* of evidence that was
+   * going to be gathered anyway. Which is exactly what changing provider calls for: the
+   * rules said the same thing before and after, and only the reading of them is new.
+   */
+  ignoreCache?: boolean;
 }
 
 export interface AssessThreatResult {
@@ -613,7 +623,7 @@ export interface AssessThreatResult {
  *   2. Layers 1 and 2 run *first and always*. They cost no tokens, so there is no
  *      version of this where the cheap evidence is skipped to save money.
  *   3. The cache is checked (rule 7) against the body hash **and** the signal
- *      fingerprint.
+ *      fingerprint — unless the caller is recomputing (`ignoreCache`).
  *   4. The model runs, on the deep tier when the rules already found hard evidence.
  *   5. The verdict is the union, and the row is written with both halves kept apart:
  *      `ruleSignals` records what the rules alone concluded, so a verdict can always be
@@ -653,16 +663,18 @@ export async function assessMessageThreat(
    * whose signals have changed is a miss: the interpretation was written about a
    * different set of facts.
    */
-  const cached = await db.aiClassification.findFirst({
-    where: { messageId: message.id, contentHash: message.contentHash },
-    select: {
-      threatLevel: true,
-      threatIntent: true,
-      threatExplanation: true,
-      threatModel: true,
-      ruleSignals: true,
-    },
-  });
+  const cached = input.ignoreCache
+    ? null
+    : await db.aiClassification.findFirst({
+        where: { messageId: message.id, contentHash: message.contentHash },
+        select: {
+          threatLevel: true,
+          threatIntent: true,
+          threatExplanation: true,
+          threatModel: true,
+          ruleSignals: true,
+        },
+      });
 
   if (cached !== null && cached.threatLevel !== "UNKNOWN") {
     const storedFingerprint = (cached.ruleSignals as { fingerprint?: unknown } | null)
