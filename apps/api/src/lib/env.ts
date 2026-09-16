@@ -59,12 +59,37 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().default(""),
 
   /**
+   * Which model provider the AI layer talks to.
+   *
+   * Explicit beats inferred: "why is this mailbox full of stubbed classifications"
+   * should be answerable from one variable rather than deduced from which keys
+   * happen to be set. Left unset it *is* inferred, exactly as it was before this
+   * existed — a key means the real API, no key outside production means the stub —
+   * so nothing about an existing `.env` or `pnpm dev` changes.
+   *
+   *   anthropic  the Anthropic API (or a gateway, via ANTHROPIC_BASE_URL)
+   *   gemini     Google's Gemini API, on the free tier (GEMINI_API_KEY)
+   *   stub       the local canned-response server. Refused in production.
+   */
+  AI_PROVIDER: z.enum(["anthropic", "gemini", "stub"]).optional(),
+
+  /**
    * Anthropic API key for the AI layer. Empty is allowed at boot for the same
    * reason as the provider credentials: the API must start and serve /health on a
    * machine with no AI configured. `services/ai/client.ts` refuses the call with a
    * clear error instead of failing mysteriously at the first classification.
    */
   ANTHROPIC_API_KEY: z.string().default(""),
+
+  /**
+   * Google AI Studio key for the Gemini path (`AI_PROVIDER=gemini`).
+   *
+   * Free tier, which is the reason this provider exists at all — so
+   * `services/ai/models.ts` prices every Gemini model at zero while still recording
+   * the token counts. Empty with `AI_PROVIDER=gemini` is a startup-shaped failure
+   * reported at the first call, like a missing Anthropic key.
+   */
+  GEMINI_API_KEY: z.string().default(""),
 
   /**
    * Send AI calls somewhere other than api.anthropic.com: the local stub in

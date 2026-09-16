@@ -1,79 +1,60 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { env } from "../../lib/env.js";
 import { AiCapExceededError, AiDisabledError, UpstreamError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import { withRetry } from "../../lib/retry.js";
-import { FEATURE_MODELS, MAX_OUTPUT_TOKENS, type AiFeature } from "./models.js";
+import { MAX_OUTPUT_TOKENS, modelFor, type AiFeature } from "./models.js";
 import { isRegisteredSystemPrompt, SYSTEM_PROMPTS } from "./prompts.js";
 import { resolveAiEndpoint } from "./endpoint.js";
+import { anthropicTransport, resetAnthropicClient } from "./anthropicTransport.js";
+import { geminiTransport, resetGeminiClient } from "./geminiTransport.js";
+import type { AiTransport, StructuredRequest } from "./transport.js";
 import type { TokenCounts } from "./models.js";
 import { checkDailyCap, loadAiSettings, recordUsage, type AiSettings } from "./usage.js";
 
 /**
- * The Anthropic client (§5) and the one path by which this application talks to a
- * model.
+ * The one path by which this application talks to a model (§5).
  *
- * Everything that must be true of every AI call is true here rather than at each
- * call site:
- *   - the system prompt comes from the registry, so email content cannot reach it;
- *   - exactly one tool is offered, and it returns data — there is no tool that
- *     mutates state (§7 rule 3);
- *   - the response is parsed by validating the tool input against a Zod schema,
- *     never by reading prose (rule 6);
- *   - the daily cap is checked before, and the ledger is written after — including
- *     when the response turns out to be unusable, because the tokens were spent.
+ * Everything that must be true of every AI call is true *here* rather than at each call
+ * site — and, since there is now more than one provider, rather than in each transport:
+ *
+ *   - the system prompt comes from the registry, checked by identity, so email content
+ *     cannot reach it;
+ *   - exactly one tool is offered, and it returns data — there is no tool that mutates
+ *     state (§7 rule 3);
+ *   - the response is parsed by validating the tool input against a Zod schema, never by
+ *     reading prose (rule 6);
+ *   - the daily cap is checked before, and the ledger is written after — including when
+ *     the response turns out to be unusable, because the tokens were spent.
+ *
+ * **Which provider answered changes none of that.** A transport
+ * (`services/ai/transport.ts`) translates one request into one wire format and reports
+ * what came back; it does not validate, does not judge, and cannot supply a prompt. So
+ * "a different model gets the same boundary" is a property of this file's structure
+ * rather than of four transports being careful — which is the only way it stays true.
  */
 
-/** Hard ceiling on one request. A model call is not allowed to hang a worker. */
-const REQUEST_TIMEOUT_MS = 60_000;
+/** The transports, by the name `endpoint.ts` resolves. */
+const TRANSPORTS: Readonly<Record<"anthropic" | "gemini", AiTransport>> = {
+  anthropic: anthropicTransport,
+  gemini: geminiTransport,
+};
 
-let client: Anthropic | undefined;
+/** Which transport this process is configured to use. */
+export function activeTransport(): AiTransport {
+  return TRANSPORTS[resolveAiEndpoint().provider];
+}
+
+/** Test hook: drop both memoized clients so a mocked SDK is picked up. */
+export function resetAiClients(): void {
+  resetAnthropicClient();
+  resetGeminiClient();
+}
 
 /**
- * Lazily constructed, so importing this module (or the whole app) does not require
- * an API key. The key is read once here and never logged.
+ * Kept under its old name because the Anthropic tests and the stub path both call it.
+ * `resetAiClients` is the one to use from new code.
  */
-export function anthropic(): Anthropic {
-  if (client) return client;
-
-  const endpoint = resolveAiEndpoint();
-
-  /*
-   * Logged at INFO, once, and never quietly: "which model answered" is the first
-   * question about any classification in the database, and a stubbed answer must
-   * be obvious from the logs rather than deduced from the data.
-   */
-  logger.info(
-    { baseURL: endpoint.baseURL ?? "https://api.anthropic.com", stubbed: endpoint.stubbed, reason: endpoint.reason },
-    endpoint.stubbed
-      ? "AI calls are STUBBED: responses are canned, nothing leaves this machine"
-      : "AI calls go to the Anthropic API",
-  );
-
-  if (endpoint.stubbed && env.NODE_ENV === "production") {
-    logger.error(
-      { baseURL: endpoint.baseURL },
-      "refusing to trust stubbed AI output in production",
-    );
-    throw new UpstreamError("AI stub endpoint configured in production");
-  }
-
-  client = new Anthropic({
-    apiKey: endpoint.apiKey,
-    ...(endpoint.baseURL === undefined ? {} : { baseURL: endpoint.baseURL }),
-    timeout: REQUEST_TIMEOUT_MS,
-    // Our own retry wrapper owns this: one backoff policy, one set of log lines,
-    // and a floor the SDK's defaults do not have (lib/retry.ts).
-    maxRetries: 0,
-  });
-  return client;
-}
-
-/** Test hook: drop the memoized client so a mocked SDK is picked up. */
-export function resetAnthropicClient(): void {
-  client = undefined;
-}
+export { resetAnthropicClient };
 
 export interface StructuredCallInput<T> {
   userId: string;
@@ -100,26 +81,28 @@ export interface StructuredCallResult<T> {
   tokens: TokenCounts;
 }
 
-function tokensOf(usage: Anthropic.Usage | undefined): TokenCounts {
-  return {
-    inputTokens: usage?.input_tokens ?? 0,
-    outputTokens: usage?.output_tokens ?? 0,
-    cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
-  };
-}
-
 /**
- * One structured-output call: send the prompt, get the tool input back, validate it.
+ * One structured-output call: send the prompt, get the tool arguments back, validate.
  *
- * `tool_choice` pins the single tool, so "the model replied with prose instead" is
- * not a case we have to handle by parsing prose — it is a case we reject.
+ * The ordering below is load-bearing and is the same on every provider:
+ *
+ *   1. settings, then the cap — so a refusal costs nothing;
+ *   2. resolve the prompt from the registry and assert it is ours;
+ *   3. compile the Zod schema to JSON Schema and hand the transport the request;
+ *   4. **bill**, before judging anything: spent tokens are spent;
+ *   5. reject a truncated answer, then an answer with no tool call — no prose fallback;
+ *   6. validate the tool arguments against the schema.
  */
 export async function callStructured<T>(
   input: StructuredCallInput<T>,
 ): Promise<StructuredCallResult<T>> {
   const settings = input.settings ?? (await loadAiSettings(input.userId));
-  const log = logger.child({ userId: input.userId, feature: input.feature });
+  const transport = activeTransport();
+  const log = logger.child({
+    userId: input.userId,
+    feature: input.feature,
+    provider: transport.providerName,
+  });
 
   if (!settings.aiEnabled) {
     throw new AiDisabledError("AI features are disabled for this user");
@@ -127,7 +110,8 @@ export async function callStructured<T>(
 
   const cap = await checkDailyCap(input.userId, settings);
   if (!cap.allowed) {
-    // Refused before the call, so the cap bounds spend rather than reporting it.
+    // Refused before the call, so the cap bounds spend rather than reporting it. On a
+    // free tier it bounds the *request* count, which is what the free tier rations.
     log.warn({ used: cap.used, cap: cap.cap }, "daily AI call cap reached");
     throw new AiCapExceededError("Daily AI call cap reached", {
       used: cap.used,
@@ -135,81 +119,73 @@ export async function callStructured<T>(
     });
   }
 
-  const model = FEATURE_MODELS[input.feature];
+  const model = modelFor(input.feature, transport.providerName);
   const system = SYSTEM_PROMPTS[input.feature];
 
-  // Backstop for §7 rule 1: the prompt must be one of ours, by identity.
+  // Backstop for §7 rule 1: the prompt must be one of ours, by identity. Checked here,
+  // above the transports, so no provider can be the place this is skipped.
   if (!isRegisteredSystemPrompt(system)) {
     throw new UpstreamError("refusing to call the model with an unregistered prompt");
   }
 
-  const tool: Anthropic.Tool = {
-    name: input.toolName,
-    description: input.toolDescription,
-    input_schema: z.toJSONSchema(input.schema, {
-      target: "draft-7",
-      io: "output",
-    }) as Anthropic.Tool.InputSchema,
+  const request: StructuredRequest = {
+    model,
+    system,
+    userContent: input.userContent,
+    tool: {
+      name: input.toolName,
+      description: input.toolDescription,
+      parameters: z.toJSONSchema(input.schema, {
+        target: "draft-7",
+        io: "output",
+      }) as Record<string, unknown>,
+    },
+    maxOutputTokens: MAX_OUTPUT_TOKENS[input.feature],
+    ...(input.signal ? { signal: input.signal } : {}),
   };
 
-  const response = await withRetry(
-    async () =>
-      anthropic().messages.create(
-        {
-          model,
-          max_tokens: MAX_OUTPUT_TOKENS[input.feature],
-          system,
-          // The ONLY place email content appears, and it is a user turn.
-          messages: [{ role: "user", content: input.userContent }],
-          // Exactly one tool, which returns data. Nothing here can act.
-          tools: [tool],
-          tool_choice: { type: "tool", name: input.toolName },
-          // Deterministic-ish: this is a labelling task, not a creative one.
-          temperature: 0,
-        },
-        input.signal ? { signal: input.signal } : {},
-      ),
-    {
-      label: `anthropic.${input.feature}`,
-      ...(input.signal ? { signal: input.signal } : {}),
-    },
-  );
-
-  const tokens = tokensOf(response.usage);
+  const response = await withRetry(async () => transport.complete(request), {
+    label: `${transport.providerName}.${input.feature}`,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
 
   // Billed before the response is judged: spent tokens are spent whatever came back.
   await recordUsage({
     userId: input.userId,
     feature: input.feature,
-    model: response.model ?? model,
-    tokens,
+    model: response.model,
+    tokens: response.tokens,
   });
 
-  if (response.stop_reason === "max_tokens") {
+  if (response.truncated) {
     throw new UpstreamError(`${input.feature} response hit the output ceiling`, {
       maxTokens: MAX_OUTPUT_TOKENS[input.feature],
+      provider: transport.providerName,
     });
   }
 
-  const block = response.content.find(
-    (part): part is Anthropic.ToolUseBlock =>
-      part.type === "tool_use" && part.name === input.toolName,
-  );
-
-  if (!block) {
-    // No prose fallback on purpose: parsing an unstructured answer is exactly the
-    // path by which email text becomes a field value (rule 6).
+  if (response.toolInput === undefined) {
+    // No prose fallback on purpose: parsing an unstructured answer is exactly the path
+    // by which email text becomes a field value (rule 6).
     throw new UpstreamError(`${input.feature} returned no ${input.toolName} tool call`, {
-      stopReason: response.stop_reason,
-      blocks: response.content.map((part) => part.type),
+      stopReason: response.diagnostics.stopReason,
+      blocks: response.diagnostics.blocks,
+      provider: transport.providerName,
     });
   }
 
-  const parsed = input.schema.safeParse(block.input);
+  const parsed = input.schema.safeParse(response.toolInput);
   if (!parsed.success) {
+    /*
+     * The enforcement point, and it matters more on the Gemini path than on the
+     * Anthropic one: Gemini's tool declaration cannot carry `minimum`, `maxItems` or
+     * `maxLength` (see geminiSchema.ts), so for those constraints this parse is the only
+     * thing standing between a model's guess and a database column.
+     */
     log.warn(
       {
         ...input.logContext,
+        model: response.model,
         issues: parsed.error.issues.map((issue) => ({
           path: issue.path.join("."),
           code: issue.code,
@@ -221,9 +197,9 @@ export async function callStructured<T>(
   }
 
   log.debug(
-    { ...input.logContext, model: response.model, ...tokens },
+    { ...input.logContext, model: response.model, ...response.tokens },
     "ai structured call complete",
   );
 
-  return { data: parsed.data, model: response.model ?? model, tokens };
+  return { data: parsed.data, model: response.model, tokens: response.tokens };
 }
