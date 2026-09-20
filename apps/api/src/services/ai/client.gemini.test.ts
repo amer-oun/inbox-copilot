@@ -79,13 +79,11 @@ vi.mock("@inbox-copilot/db", () => ({
 }));
 
 const { callStructured, resetAiClients } = await import("./client.js");
-const { CLASSIFY_SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } = await import(
-  "./prompts.js"
-);
+const { CLASSIFY_SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } =
+  await import("./prompts.js");
 const { GEMINI_MODELS } = await import("./models.js");
-const { AiCapExceededError, AiDisabledError, UpstreamError } = await import(
-  "../../lib/errors.js"
-);
+const { AiCapExceededError, AiDisabledError, UpstreamError } =
+  await import("../../lib/errors.js");
 
 const USER_ID = "user_1";
 const HOSTILE_BODY =
@@ -294,7 +292,10 @@ describe("the response is data only because Zod says so", () => {
   it("still enforces exactly three reply drafts", async () => {
     // `maxItems` is dropped too, and "three drafts" is a product requirement.
     generateContent.mockResolvedValue(
-      geminiResponse({ variants: [{ label: "Only one", body: "a" }] }, "record_reply_drafts"),
+      geminiResponse(
+        { variants: [{ label: "Only one", body: "a" }] },
+        "record_reply_drafts",
+      ),
     );
 
     await expect(

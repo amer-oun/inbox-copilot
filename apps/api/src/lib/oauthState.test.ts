@@ -10,9 +10,8 @@ const redis = vi.hoisted(() => ({
 
 vi.mock("./redis.js", () => ({ redis }));
 
-const { consumeOAuthState, createOAuthState, InvalidOAuthStateError } = await import(
-  "./oauthState.js"
-);
+const { consumeOAuthState, createOAuthState, InvalidOAuthStateError } =
+  await import("./oauthState.js");
 
 describe("oauth state", () => {
   beforeEach(() => {
@@ -21,9 +20,7 @@ describe("oauth state", () => {
       store.set(key, value);
       return "OK";
     });
-    redis.del.mockImplementation(async (key: string) =>
-      store.delete(key) ? 1 : 0,
-    );
+    redis.del.mockImplementation(async (key: string) => (store.delete(key) ? 1 : 0));
   });
 
   it("round-trips the user and provider", async () => {

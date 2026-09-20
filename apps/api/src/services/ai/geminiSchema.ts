@@ -28,13 +28,7 @@ import { UpstreamError } from "../../lib/errors.js";
 /** Gemini's `SchemaType` values. Spelled out rather than imported from the SDK so this
  * module is testable without constructing a client, and so a version bump that renames
  * the enum fails at the type level here instead of at the first call. */
-export type GeminiType =
-  | "string"
-  | "number"
-  | "integer"
-  | "boolean"
-  | "array"
-  | "object";
+export type GeminiType = "string" | "number" | "integer" | "boolean" | "array" | "object";
 
 export interface GeminiSchema {
   type: GeminiType;

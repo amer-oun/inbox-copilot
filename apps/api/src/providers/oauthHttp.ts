@@ -94,11 +94,7 @@ export async function postTokenRequest(
  * refresh token was rotated out from under us. Retrying cannot fix it — the
  * mailbox has to be reconnected, so it gets its own error type.
  */
-function toTokenError(
-  body: string,
-  status: number,
-  providerLabel: string,
-): Error {
+function toTokenError(body: string, status: number, providerLabel: string): Error {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
@@ -209,4 +205,3 @@ export async function postRevokeRequest(
     ...(error.success ? { providerError: error.data.error } : {}),
   });
 }
-

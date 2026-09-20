@@ -26,10 +26,19 @@ const internal = generateKeyPairSync("rsa", {
   privateKeyEncoding: { type: "pkcs8", format: "pem" },
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
-process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(internal.publicKey).toString("base64");
+process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(internal.publicKey).toString(
+  "base64",
+);
 
 const jwk = await exportJWK(createPrivateKey(keypair.privateKey));
-const publicJwk = { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", use: "sig", kid: "test-key" };
+const publicJwk = {
+  kty: jwk.kty,
+  n: jwk.n,
+  e: jwk.e,
+  alg: "RS256",
+  use: "sig",
+  kid: "test-key",
+};
 
 vi.stubGlobal(
   "fetch",
@@ -54,7 +63,10 @@ vi.mock("@inbox-copilot/db", () => ({
 }));
 
 vi.mock("../services/threads.js", () => ({ listThreads: vi.fn(), getThread: vi.fn() }));
-vi.mock("../services/sync.js", () => ({ startBackfill: vi.fn(), getSyncStatus: vi.fn() }));
+vi.mock("../services/sync.js", () => ({
+  startBackfill: vi.fn(),
+  getSyncStatus: vi.fn(),
+}));
 vi.mock("../services/mailAccounts.js", () => ({
   listMailAccounts: vi.fn(),
   startMailAccountConnect: vi.fn(),
@@ -168,7 +180,10 @@ describe("authentication", () => {
   it("refuses a token minted for a different audience", async () => {
     const response = await request(createApp())
       .post("/webhooks/gmail")
-      .set("authorization", `Bearer ${await pushToken({ audience: "https://someone.else/hook" })}`)
+      .set(
+        "authorization",
+        `Bearer ${await pushToken({ audience: "https://someone.else/hook" })}`,
+      )
       .send(pushBody());
 
     expect(response.status).toBe(401);
@@ -182,7 +197,10 @@ describe("authentication", () => {
      */
     const response = await request(createApp())
       .post("/webhooks/gmail")
-      .set("authorization", `Bearer ${await pushToken({ email: "attacker@evil.iam.gserviceaccount.com" })}`)
+      .set(
+        "authorization",
+        `Bearer ${await pushToken({ email: "attacker@evil.iam.gserviceaccount.com" })}`,
+      )
       .send(pushBody());
 
     expect(response.status).toBe(401);
@@ -201,7 +219,10 @@ describe("authentication", () => {
   it("refuses a token from the wrong issuer", async () => {
     const response = await request(createApp())
       .post("/webhooks/gmail")
-      .set("authorization", `Bearer ${await pushToken({ issuer: "https://evil.example" })}`)
+      .set(
+        "authorization",
+        `Bearer ${await pushToken({ issuer: "https://evil.example" })}`,
+      )
       .send(pushBody());
 
     expect(response.status).toBe(401);
@@ -330,7 +351,10 @@ describe("the payload", () => {
       { message: { data: "not-base64-json" } },
       { message: { data: Buffer.from("{}", "utf8").toString("base64") } },
     ]) {
-      const response = await request(createApp()).post("/webhooks/gmail").set(auth).send(body);
+      const response = await request(createApp())
+        .post("/webhooks/gmail")
+        .set(auth)
+        .send(body);
       expect(response.status).toBe(204);
     }
     expect(enqueueDelta).not.toHaveBeenCalled();
@@ -350,7 +374,10 @@ describe("the payload", () => {
   it("does no syncing itself", async () => {
     // It verifies, enqueues and answers. Syncing inline would hold Pub/Sub's connection
     // for the length of a Gmail read and let a burst become concurrent syncs.
-    const response = await request(createApp()).post("/webhooks/gmail").set(auth).send(pushBody());
+    const response = await request(createApp())
+      .post("/webhooks/gmail")
+      .set(auth)
+      .send(pushBody());
 
     expect(response.status).toBe(204);
     expect(response.text).toBe("");

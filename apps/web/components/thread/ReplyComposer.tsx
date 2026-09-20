@@ -3,7 +3,15 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { BellRing, CalendarClock, Check, Loader2, Send, Sparkles, TriangleAlert } from "lucide-react";
+import {
+  BellRing,
+  CalendarClock,
+  Check,
+  Loader2,
+  Send,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
 import {
   replyDraftsResponseSchema,
   replyToneSchema,
@@ -274,7 +282,10 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
       </header>
 
       {generate.isError && (
-        <p role="alert" className="border-b border-border-subtle px-4 py-2 text-sm text-danger">
+        <p
+          role="alert"
+          className="border-b border-border-subtle px-4 py-2 text-sm text-danger"
+        >
           {generate.error.message}
         </p>
       )}
@@ -473,7 +484,10 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
         )}
 
         {scheduledFor !== null && (
-          <p role="status" className="mt-2 flex items-center gap-1.5 text-sm text-success">
+          <p
+            role="status"
+            className="mt-2 flex items-center gap-1.5 text-sm text-success"
+          >
             <Check aria-hidden="true" className="size-4" />
             {`Scheduled for ${scheduledFor.replace("T", " ")} (${timeZone}). `}
             <a href="/scheduled" className="underline">

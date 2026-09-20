@@ -154,11 +154,9 @@ export function untrustedEmailBlock(input: UntrustedEmailInput): string {
 /** Builds the untrusted block for a whole thread, oldest message first. */
 export function untrustedThreadBlock(messages: readonly UntrustedEmailInput[]): string {
   const blocks = messages.map((message, index) =>
-    [
-      `<message index="${index + 1}">`,
-      untrustedEmailBlock(message),
-      "</message>",
-    ].join("\n"),
+    [`<message index="${index + 1}">`, untrustedEmailBlock(message), "</message>"].join(
+      "\n",
+    ),
   );
 
   return ["<thread>", ...blocks, "</thread>"].join("\n");
@@ -370,7 +368,9 @@ function untrustedCollectionBlock(
   messages: readonly UntrustedEmailInput[],
 ): string {
   const blocks = messages.map((message, index) =>
-    [`<message index="${index + 1}">`, untrustedEmailBlock(message), "</message>"].join("\n"),
+    [`<message index="${index + 1}">`, untrustedEmailBlock(message), "</message>"].join(
+      "\n",
+    ),
   );
   return [`<${tag}>`, ...blocks, `</${tag}>`].join("\n");
 }

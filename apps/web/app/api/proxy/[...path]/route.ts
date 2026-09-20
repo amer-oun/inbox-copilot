@@ -141,7 +141,11 @@ export async function GET(
   if (!ALLOWED_GET_PATHS.some((pattern) => pattern.test(joined))) return notProxied();
 
   try {
-    const body = await apiFetch(session.user.id, targetPath(request, joined), passthroughSchema);
+    const body = await apiFetch(
+      session.user.id,
+      targetPath(request, joined),
+      passthroughSchema,
+    );
     return NextResponse.json(body, {
       // Per-user mail: never cached by a shared cache, never stored by the browser.
       headers: { "cache-control": "private, no-store" },

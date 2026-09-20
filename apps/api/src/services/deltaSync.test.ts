@@ -92,7 +92,13 @@ function rawMessage(providerMessageId: string, overrides: Record<string, unknown
     isDraft: false,
     hasAttachments: false,
     headers: {},
-    authResults: { spf: null, dkim: null, dmarc: null, returnPath: null, displayNameMismatch: false },
+    authResults: {
+      spf: null,
+      dkim: null,
+      dmarc: null,
+      returnPath: null,
+      displayNameMismatch: false,
+    },
     contentHash: `hash-${providerMessageId}`,
     attachments: [],
     labels: ["INBOX"],
@@ -124,10 +130,14 @@ beforeEach(() => {
   runFollowUpCheck
     .mockReset()
     .mockResolvedValue({ examined: 0, resolved: 0, triggered: 0, digestsSent: 0 });
-  startBackfill.mockReset().mockResolvedValue({ enqueued: true, jobId: "backfill-mail_1" });
-  enqueueEnrichment.mockReset().mockImplementation(({ messageIds }: { messageIds: string[] }) =>
-    Promise.resolve(messageIds.length),
-  );
+  startBackfill
+    .mockReset()
+    .mockResolvedValue({ enqueued: true, jobId: "backfill-mail_1" });
+  enqueueEnrichment
+    .mockReset()
+    .mockImplementation(({ messageIds }: { messageIds: string[] }) =>
+      Promise.resolve(messageIds.length),
+    );
   accountFindFirst.mockReset().mockResolvedValue(mailbox());
   accountUpdate.mockReset().mockResolvedValue({});
   // "m_1 already known, m_2 is new".
@@ -143,7 +153,13 @@ describe("foldChanges", () => {
     const folded = foldChanges([
       { kind: "upserted", providerThreadId: "t_1", providerMessageId: "m_1" },
       { kind: "upserted", providerThreadId: "t_1", providerMessageId: "m_2" },
-      { kind: "labelsChanged", providerThreadId: "t_2", providerMessageId: "m_3", labelsAdded: ["STARRED"], labelsRemoved: [] },
+      {
+        kind: "labelsChanged",
+        providerThreadId: "t_2",
+        providerMessageId: "m_3",
+        labelsAdded: ["STARRED"],
+        labelsRemoved: [],
+      },
     ]);
 
     expect(folded.threadIds).toEqual(["t_1", "t_2"]);
@@ -300,7 +316,10 @@ describe("runDelta", () => {
     const result = await runDelta(job());
 
     expect(result.recovered).toBe("backfill");
-    expect(startBackfill).toHaveBeenCalledWith({ userId: USER_ID, mailAccountId: ACCOUNT_ID });
+    expect(startBackfill).toHaveBeenCalledWith({
+      userId: USER_ID,
+      mailAccountId: ACCOUNT_ID,
+    });
     // The stale cursor is cleared, so nothing tries to be incremental from it again.
     expect(accountUpdate).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ syncCursor: null }) }),
@@ -335,7 +354,9 @@ describe("runDelta", () => {
     await runDelta(job());
 
     expect(accountUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ syncStatus: "ACTIVE" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ syncStatus: "ACTIVE" }),
+      }),
     );
   });
 

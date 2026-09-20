@@ -78,7 +78,12 @@ export async function sendFollowUpDigest(input: {
     },
     orderBy: { dueAt: "asc" },
     take: MAX_ITEMS,
-    select: { id: true, dueAt: true, reason: true, thread: { select: { subject: true } } },
+    select: {
+      id: true,
+      dueAt: true,
+      reason: true,
+      thread: { select: { subject: true } },
+    },
   });
 
   if (rows.length === 0) return { sent: false, reason: "no-items" };
@@ -106,7 +111,11 @@ export async function sendFollowUpDigest(input: {
         Math.floor((now.getTime() - row.dueAt.getTime()) / (24 * 3_600_000)),
       );
       const waited =
-        waitingDays === 0 ? "due today" : waitingDays === 1 ? "1 day overdue" : `${waitingDays} days overdue`;
+        waitingDays === 0
+          ? "due today"
+          : waitingDays === 1
+            ? "1 day overdue"
+            : `${waitingDays} days overdue`;
       return `<li><strong>${escapeHtml(title)}</strong> — ${waited}</li>`;
     })
     .join("\n");

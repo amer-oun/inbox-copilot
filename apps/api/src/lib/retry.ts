@@ -194,7 +194,8 @@ export function reasonOf(error: unknown): string | undefined {
 }
 
 /** Keys whose values never reach a log line, at any depth (rule 3). */
-const TOKEN_KEY = /(^|_|\.)(access_?token|refresh_?token|id_?token|authorization|bearer)$/i;
+const TOKEN_KEY =
+  /(^|_|\.)(access_?token|refresh_?token|id_?token|authorization|bearer)$/i;
 
 /**
  * Deep copy with token-shaped values censored.
@@ -305,10 +306,7 @@ export function backoffDelayMs(
   const jittered = exponential * (1 + options.random() * JITTER_RATIO);
   // The ceiling is a hard bound on the result, not just on the curve before jitter:
   // "exponential to 30s" should mean no retry ever waits longer than 30s.
-  return Math.min(
-    options.maxDelayMs,
-    Math.max(options.minDelayMs, Math.round(jittered)),
-  );
+  return Math.min(options.maxDelayMs, Math.max(options.minDelayMs, Math.round(jittered)));
 }
 
 export async function withRetry<T>(

@@ -79,7 +79,9 @@ export function parsePrompt(userContent: string): ParsedPrompt {
     }
   }
 
-  const bodies = [...userContent.matchAll(/<\/email_metadata>\n([\s\S]*?)\n<\/untrusted_email>/g)]
+  const bodies = [
+    ...userContent.matchAll(/<\/email_metadata>\n([\s\S]*?)\n<\/untrusted_email>/g),
+  ]
     .map((match) => (match[1] ?? "").trim())
     .filter((body) => body.length > 0);
 
@@ -207,7 +209,13 @@ export function stubClassification(userContent: string): AiClassificationOutput 
   const priorityScore = Math.max(0, Math.min(100, score));
 
   const band =
-    priorityScore >= 80 ? "URGENT" : priorityScore >= 60 ? "HIGH" : priorityScore >= 30 ? "NORMAL" : "LOW";
+    priorityScore >= 80
+      ? "URGENT"
+      : priorityScore >= 60
+        ? "HIGH"
+        : priorityScore >= 30
+          ? "NORMAL"
+          : "LOW";
 
   return aiClassificationSchema.parse({
     category,
@@ -246,7 +254,12 @@ export function stubSummary(userContent: string): AiSummaryOutput {
     summary: `[stubbed summary] A thread of ${count} message${count === 1 ? "" : "s"} with ${sender}, subject "${subject}". This text is generated locally by the development AI stub and describes the thread's shape, not its meaning: no model read this mail.`,
     keyPoints: keyPoints.length > 0 ? keyPoints : [`Subject: ${subject}`],
     actionItems: asksSomething
-      ? [{ text: `Reply to ${sender} about "${firstSentence(subject, 60)}"`, owner: "user" }]
+      ? [
+          {
+            text: `Reply to ${sender} about "${firstSentence(subject, 60)}"`,
+            owner: "user",
+          },
+        ]
       : [],
   });
 }
@@ -306,7 +319,10 @@ export function stubReplyVariants(userContent: string): AiReplyVariantsOutput {
   const subject = metadata["subject"] ?? "(no subject)";
   const sender = (metadata["from"] ?? "someone").replace(/\s*<[^>]*>$/, "");
   const tone = request["tone"] ?? "PROFESSIONAL";
-  const greeting = (request["greeting"] ?? "Hi <name>,").replace(/<name>/g, firstName(sender));
+  const greeting = (request["greeting"] ?? "Hi <name>,").replace(
+    /<name>/g,
+    firstName(sender),
+  );
   const signOff = request["sign_off"] ?? "Best,";
 
   const shapes = [
@@ -358,7 +374,10 @@ export function stubComposedMessage(userContent: string): AiComposedMessageOutpu
   const signOff = request["sign_off"] ?? "Best,";
 
   return aiComposedMessageSchema.parse({
-    subject: firstSentence(intent === "" ? "Quick note" : intent, 70).replace(/[.!?]$/, ""),
+    subject: firstSentence(intent === "" ? "Quick note" : intent, 70).replace(
+      /[.!?]$/,
+      "",
+    ),
     body: [
       greeting,
       "",
@@ -394,7 +413,9 @@ export function stubWritingStyle(userContent: string): AiWritingStyleOutput {
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && line.length < 60);
 
-  const greeting = firstLines.find((line) => /^(hi|hello|hey|dear|bonjour|salut)\b/i.test(line));
+  const greeting = firstLines.find((line) =>
+    /^(hi|hello|hey|dear|bonjour|salut)\b/i.test(line),
+  );
   const signOff = lastLines.find((line) =>
     /^(best|thanks|thank you|regards|cheers|cordialement|merci)\b/i.test(line),
   );
@@ -402,7 +423,9 @@ export function stubWritingStyle(userContent: string): AiWritingStyleOutput {
   return aiWritingStyleSchema.parse({
     greeting: greeting === undefined ? "" : greeting.replace(/\s+\S+[,!]?$/, " <name>,"),
     signOff: signOff ?? "",
-    formality: bodies.some((body) => /\b(hey|thanks!|cheers)\b/i.test(body)) ? "casual" : "neutral",
+    formality: bodies.some((body) => /\b(hey|thanks!|cheers)\b/i.test(body))
+      ? "casual"
+      : "neutral",
     descriptor: `[stubbed style profile] Derived locally from the opening and closing lines of ${bodies.length} sent message${bodies.length === 1 ? "" : "s"}, not from a model reading them. Treat it as a placeholder that proves the profile reaches the reply prompt — it describes the samples' structure, not this person's voice.`,
   });
 }
@@ -450,11 +473,12 @@ export function stubThreatAssessment(userContent: string): AiThreatAssessmentOut
   const score = Number(signals["deterministic_score"] ?? "0");
   const automated = isAutomated(metadata);
 
-  const intent = floor === "SAFE"
-    ? automated
-      ? "BENIGN_TRANSACTIONAL"
-      : "BENIGN_PERSONAL"
-    : "UNCLEAR";
+  const intent =
+    floor === "SAFE"
+      ? automated
+        ? "BENIGN_TRANSACTIONAL"
+        : "BENIGN_PERSONAL"
+      : "UNCLEAR";
 
   return aiThreatAssessmentSchema.parse({
     intent,
@@ -593,7 +617,10 @@ export function createAiStubServer(): Server {
         res.end(
           JSON.stringify({
             type: "error",
-            error: { type: "invalid_request_error", message: "stub could not parse the request" },
+            error: {
+              type: "invalid_request_error",
+              message: "stub could not parse the request",
+            },
           }),
         );
       }

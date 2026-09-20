@@ -14,13 +14,18 @@ const keypair = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
 const privateKey = createPrivateKey(keypair.privateKey);
-process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString("base64");
+process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString(
+  "base64",
+);
 
 const listThreads = vi.hoisted(() => vi.fn());
 const getThread = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/threads.js", () => ({ listThreads, getThread }));
-vi.mock("../services/sync.js", () => ({ startBackfill: vi.fn(), getSyncStatus: vi.fn() }));
+vi.mock("../services/sync.js", () => ({
+  startBackfill: vi.fn(),
+  getSyncStatus: vi.fn(),
+}));
 vi.mock("../services/mailAccounts.js", () => ({
   listMailAccounts: vi.fn(),
   startMailAccountConnect: vi.fn(),
@@ -223,7 +228,9 @@ describe("GET /threads/:threadId", () => {
     const app = createApp();
 
     for (const method of ["post", "patch", "delete"] as const) {
-      const response = await request(app)[method](`/threads/${THREAD_ID}`).set("authorization", token);
+      const response = await request(app)
+        [method](`/threads/${THREAD_ID}`)
+        .set("authorization", token);
       expect(response.status).toBe(404);
     }
   });

@@ -103,7 +103,7 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
     return fn(gmail, signal ? { signal } : {});
   }
 
-      /**
+  /**
    * One page of `history.list`, with the one error that is not a failure.
    *
    * Gmail keeps roughly a week of history and answers 404 for a `startHistoryId`
@@ -207,7 +207,10 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
       return mapThread(response.data, { mailboxAddress: context.emailAddress });
     },
 
-    async getAttachment(providerMessageId: string, attachmentId: string): Promise<Buffer> {
+    async getAttachment(
+      providerMessageId: string,
+      attachmentId: string,
+    ): Promise<Buffer> {
       const response = await call(
         "users.messages.attachments.get",
         async (gmail, requestOptions) =>
@@ -273,27 +276,31 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
      * failure to the caller, who can show it to the person who pressed the button.
      */
     async sendMessage(input: OutboundMessage) {
-      const raw = encodeMimeForGmail(buildMimeMessage(toMime(input, context.emailAddress)));
+      const raw = encodeMimeForGmail(
+        buildMimeMessage(toMime(input, context.emailAddress)),
+      );
 
-      const response = await callOnce("users.messages.send", async (gmail, requestOptions) =>
-        gmail.users.messages.send(
-          {
-            userId: "me",
-            requestBody: {
-              raw,
-              /*
-               * Gmail's own grouping for this mailbox. It is *not* a substitute for
-               * In-Reply-To/References — those are what every other participant's
-               * client threads on — and Gmail rejects a threadId whose subject does
-               * not match, so the reply subject keeps the parent's.
-               */
-              ...(input.inReplyTo === undefined
-                ? {}
-                : { threadId: input.inReplyTo.providerThreadId }),
+      const response = await callOnce(
+        "users.messages.send",
+        async (gmail, requestOptions) =>
+          gmail.users.messages.send(
+            {
+              userId: "me",
+              requestBody: {
+                raw,
+                /*
+                 * Gmail's own grouping for this mailbox. It is *not* a substitute for
+                 * In-Reply-To/References — those are what every other participant's
+                 * client threads on — and Gmail rejects a threadId whose subject does
+                 * not match, so the reply subject keeps the parent's.
+                 */
+                ...(input.inReplyTo === undefined
+                  ? {}
+                  : { threadId: input.inReplyTo.providerThreadId }),
+              },
             },
-          },
-          requestOptions,
-        ),
+            requestOptions,
+          ),
       );
 
       const providerMessageId = response.data.id;
@@ -316,7 +323,9 @@ export function createGmailProvider(context: MailProviderContext): MailProvider 
      * which a duplicated *send* is not.
      */
     async createDraft(input: OutboundMessage) {
-      const raw = encodeMimeForGmail(buildMimeMessage(toMime(input, context.emailAddress)));
+      const raw = encodeMimeForGmail(
+        buildMimeMessage(toMime(input, context.emailAddress)),
+      );
 
       const response = await call("users.drafts.create", async (gmail, requestOptions) =>
         gmail.users.drafts.create(
@@ -467,10 +476,7 @@ function toMime(input: OutboundMessage, mailboxAddress: string): MimeMessageInpu
  * is: `services/send.ts` builds the full chain from the stored header, while a caller
  * that only has the parent's Message-ID passes the chain without it.
  */
-function appendParent(
-  references: readonly string[],
-  parentMessageId: string,
-): string[] {
+function appendParent(references: readonly string[], parentMessageId: string): string[] {
   return references.at(-1) === parentMessageId
     ? [...references]
     : [...references, parentMessageId];
@@ -531,8 +537,18 @@ function mergeLabelChange(
   changes.set(ids.providerMessageId, {
     kind: "labelsChanged",
     ...ids,
-    labelsAdded: [...new Set([...(existing?.kind === "labelsChanged" ? existing.labelsAdded : []), ...added])],
-    labelsRemoved: [...new Set([...(existing?.kind === "labelsChanged" ? existing.labelsRemoved : []), ...removed])],
+    labelsAdded: [
+      ...new Set([
+        ...(existing?.kind === "labelsChanged" ? existing.labelsAdded : []),
+        ...added,
+      ]),
+    ],
+    labelsRemoved: [
+      ...new Set([
+        ...(existing?.kind === "labelsChanged" ? existing.labelsRemoved : []),
+        ...removed,
+      ]),
+    ],
   });
 }
 

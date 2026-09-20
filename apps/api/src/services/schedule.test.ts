@@ -82,7 +82,8 @@ const {
   sweepDueScheduledEmails,
   SWEEP_LEAD_MS,
 } = await import("./schedule.js");
-const { BadRequestError, ConflictError, NotFoundError } = await import("../lib/errors.js");
+const { BadRequestError, ConflictError, NotFoundError } =
+  await import("../lib/errors.js");
 
 const USER_ID = "user_1";
 const SCHEDULED_ID = "cldd4kzai000108l3a1b2c3d4";
@@ -172,7 +173,9 @@ beforeEach(() => {
     providerMessageId: "sent_1",
     providerThreadId: "gmail_thread_1",
   });
-  createFollowUpReminder.mockReset().mockResolvedValue({ id: "cldd4kzai000508l3a1b2c3d4" });
+  createFollowUpReminder
+    .mockReset()
+    .mockResolvedValue({ id: "cldd4kzai000508l3a1b2c3d4" });
 });
 
 describe("scheduling a reply", () => {
@@ -605,7 +608,10 @@ describe("cancelling", () => {
     scheduledFindFirstOrThrow.mockResolvedValue(scheduledRow({ status: "CANCELLED" }));
     queueGetJob.mockResolvedValue({ getState: async () => "delayed", remove: jobRemove });
 
-    const result = await cancelScheduledEmail({ userId: USER_ID, scheduledId: SCHEDULED_ID });
+    const result = await cancelScheduledEmail({
+      userId: USER_ID,
+      scheduledId: SCHEDULED_ID,
+    });
 
     expect(result.status).toBe("CANCELLED");
     expect(scheduledUpdateMany.mock.calls[0]?.[0]).toEqual({
@@ -631,7 +637,10 @@ describe("cancelling", () => {
     scheduledFindFirstOrThrow.mockResolvedValue(scheduledRow({ status: "CANCELLED" }));
     queueGetJob.mockRejectedValue(new Error("redis is down"));
 
-    const result = await cancelScheduledEmail({ userId: USER_ID, scheduledId: SCHEDULED_ID });
+    const result = await cancelScheduledEmail({
+      userId: USER_ID,
+      scheduledId: SCHEDULED_ID,
+    });
     expect(result.status).toBe("CANCELLED");
   });
 

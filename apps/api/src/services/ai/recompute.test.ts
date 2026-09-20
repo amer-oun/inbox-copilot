@@ -59,9 +59,11 @@ beforeEach(() => {
   settingsFindFirst.mockReset().mockResolvedValue(null);
   usageCount.mockReset().mockResolvedValue(0);
   queryRaw.mockReset().mockResolvedValue([]);
-  enqueueEnrichment.mockReset().mockImplementation(
-    ({ messageIds }: { messageIds: string[] }) => Promise.resolve(messageIds.length),
-  );
+  enqueueEnrichment
+    .mockReset()
+    .mockImplementation(({ messageIds }: { messageIds: string[] }) =>
+      Promise.resolve(messageIds.length),
+    );
 });
 
 describe("findMessagesToRecompute", () => {
@@ -151,7 +153,11 @@ describe("the recompute sweep", () => {
     messageFindMany.mockResolvedValue(rows().slice(0, 2));
     messageCount.mockResolvedValue(57);
 
-    const result = await sweepUserEnrichment({ userId: USER_ID, recompute: true, limit: 2 });
+    const result = await sweepUserEnrichment({
+      userId: USER_ID,
+      recompute: true,
+      limit: 2,
+    });
 
     expect(result).toMatchObject({ found: 2, remaining: 55 });
   });

@@ -51,8 +51,8 @@ export default async function ScheduledPage() {
       {failed > 0 && (
         <p className="mt-3 rounded-card border border-border-subtle bg-surface px-4 py-3 text-sm text-muted">
           Failed sends are never retried automatically, because a send that fails after
-          the mail server may already have accepted it could deliver twice. Anything
-          below marked failed needs sending again by hand.
+          the mail server may already have accepted it could deliver twice. Anything below
+          marked failed needs sending again by hand.
         </p>
       )}
 

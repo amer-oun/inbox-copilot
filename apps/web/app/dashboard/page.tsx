@@ -20,11 +20,7 @@ export default async function DashboardPage() {
   const session = await requireSession("/dashboard");
   const { user } = session;
 
-  const { accounts } = await apiFetch(
-    user.id,
-    "/mail-accounts",
-    mailAccountListSchema,
-  );
+  const { accounts } = await apiFetch(user.id, "/mail-accounts", mailAccountListSchema);
 
   const needsReconnect = accounts.filter((account) => account.needsReconnect);
 
@@ -109,7 +105,9 @@ export default async function DashboardPage() {
 
           {needsReconnect.length > 0 ? (
             <p className="pt-2 text-sm text-danger">
-              {needsReconnect.length === 1 ? "A mailbox" : `${needsReconnect.length} mailboxes`}{" "}
+              {needsReconnect.length === 1
+                ? "A mailbox"
+                : `${needsReconnect.length} mailboxes`}{" "}
               lost access.{" "}
               <Link href="/settings/accounts" className="underline">
                 Reconnect

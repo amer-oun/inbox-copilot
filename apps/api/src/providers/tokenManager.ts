@@ -1,5 +1,9 @@
 import { dbForUser } from "@inbox-copilot/db";
-import { InvalidGrantError, MailAccountRevokedError, NotFoundError } from "../lib/errors.js";
+import {
+  InvalidGrantError,
+  MailAccountRevokedError,
+  NotFoundError,
+} from "../lib/errors.js";
 import { currentKeyVersion, decrypt, encrypt } from "../lib/crypto.js";
 import { withMutex } from "../lib/mutex.js";
 import { logger } from "../lib/logger.js";
@@ -324,4 +328,3 @@ export async function revokeMailboxGrant(
     return { revoked: false };
   }
 }
-

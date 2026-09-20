@@ -149,7 +149,9 @@ describe("GmailProvider", () => {
     it("tolerates an empty mailbox", async () => {
       threadsList.mockResolvedValue({ data: {} });
 
-      await expect(createGmailProvider(CONTEXT).listThreadIds({ limit: 50 })).resolves.toEqual({
+      await expect(
+        createGmailProvider(CONTEXT).listThreadIds({ limit: 50 }),
+      ).resolves.toEqual({
         items: [],
         nextPageToken: null,
       });
@@ -195,9 +197,9 @@ describe("GmailProvider", () => {
     it("throws when the attachment has no content", async () => {
       attachmentsGet.mockResolvedValue({ data: {} });
 
-      await expect(createGmailProvider(CONTEXT).getAttachment("m1", "a1")).rejects.toThrow(
-        /no content/,
-      );
+      await expect(
+        createGmailProvider(CONTEXT).getAttachment("m1", "a1"),
+      ).rejects.toThrow(/no content/);
     });
   });
 
@@ -265,7 +267,9 @@ describe("GmailProvider", () => {
         .mockResolvedValueOnce({
           data: {
             historyId: "2100",
-            history: [{ id: "2", messagesAdded: [{ message: { id: "b", threadId: "tb" } }] }],
+            history: [
+              { id: "2", messagesAdded: [{ message: { id: "b", threadId: "tb" } }] },
+            ],
           },
         });
 
@@ -285,7 +289,10 @@ describe("GmailProvider", () => {
 
     it("ignores history entries with no usable ids", async () => {
       historyListFn.mockResolvedValue({
-        data: { historyId: "5", history: [{ id: "1", messagesAdded: [{ message: {} }] }] },
+        data: {
+          historyId: "5",
+          history: [{ id: "1", messagesAdded: [{ message: {} }] }],
+        },
       });
 
       const result = await createGmailProvider(CONTEXT).syncDelta("1");
@@ -295,7 +302,9 @@ describe("GmailProvider", () => {
 
   describe("quota pacing", () => {
     it("spends the method's quota before every call", async () => {
-      getProfileFn.mockResolvedValue({ data: { emailAddress: "p@e.test", historyId: "1" } });
+      getProfileFn.mockResolvedValue({
+        data: { emailAddress: "p@e.test", historyId: "1" },
+      });
       threadsList.mockResolvedValue({ data: { threads: [] } });
       threadsGet.mockResolvedValue({ data: invoiceThread });
       const provider = createGmailProvider(CONTEXT);
@@ -311,7 +320,9 @@ describe("GmailProvider", () => {
         "users.threads.list",
         "users.threads.get",
       ]);
-      expect(acquireGmailQuota.mock.calls.every((call) => call[0] === "mail_1")).toBe(true);
+      expect(acquireGmailQuota.mock.calls.every((call) => call[0] === "mail_1")).toBe(
+        true,
+      );
     });
 
     it("acquires before the request is made, not alongside it", async () => {
@@ -333,7 +344,9 @@ describe("GmailProvider", () => {
       const rateLimited = Object.assign(new Error("rate limited"), {
         response: { status: 429, headers: { "retry-after": "0" } },
       });
-      threadsGet.mockRejectedValueOnce(rateLimited).mockResolvedValue({ data: invoiceThread });
+      threadsGet
+        .mockRejectedValueOnce(rateLimited)
+        .mockResolvedValue({ data: invoiceThread });
 
       await createGmailProvider(CONTEXT).getThread("t1");
 
@@ -346,17 +359,20 @@ describe("GmailProvider", () => {
       const controller = new AbortController();
       threadsGet.mockResolvedValue({ data: invoiceThread });
 
-      await createGmailProvider({ ...CONTEXT, signal: controller.signal }).getThread("t1");
-
-      expect(threadsGet).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "t1" }),
-        { signal: controller.signal },
+      await createGmailProvider({ ...CONTEXT, signal: controller.signal }).getThread(
+        "t1",
       );
+
+      expect(threadsGet).toHaveBeenCalledWith(expect.objectContaining({ id: "t1" }), {
+        signal: controller.signal,
+      });
     });
 
     it("passes the signal to the quota wait, so a cancelled job stops queueing", async () => {
       const controller = new AbortController();
-      getProfileFn.mockResolvedValue({ data: { emailAddress: "p@e.test", historyId: "1" } });
+      getProfileFn.mockResolvedValue({
+        data: { emailAddress: "p@e.test", historyId: "1" },
+      });
 
       await createGmailProvider({ ...CONTEXT, signal: controller.signal }).getProfile();
 
@@ -368,7 +384,9 @@ describe("GmailProvider", () => {
     });
 
     it("omits request options entirely when there is no signal", async () => {
-      getProfileFn.mockResolvedValue({ data: { emailAddress: "p@e.test", historyId: "1" } });
+      getProfileFn.mockResolvedValue({
+        data: { emailAddress: "p@e.test", historyId: "1" },
+      });
 
       await createGmailProvider(CONTEXT).getProfile();
 
@@ -494,9 +512,11 @@ describe("GmailProvider", () => {
        * this file; for a send it is not, because the failure may be on the response
        * path and the message may already be out. One attempt, then tell the caller.
        */
-      messagesSend.mockReset().mockRejectedValue(
-        Object.assign(new Error("rate limit"), { response: { status: 429 } }),
-      );
+      messagesSend
+        .mockReset()
+        .mockRejectedValue(
+          Object.assign(new Error("rate limit"), { response: { status: 429 } }),
+        );
 
       await expect(
         createGmailProvider(CONTEXT).sendMessage({
@@ -655,15 +675,17 @@ describe("GmailProvider", () => {
         Object.assign(new Error("boom"), { response: { status: 400 } }),
       );
 
-      await expect(createGmailProvider(CONTEXT).syncDelta("12345")).rejects.toThrow(/boom/);
+      await expect(createGmailProvider(CONTEXT).syncDelta("12345")).rejects.toThrow(
+        /boom/,
+      );
     });
   });
 
   describe("methods belonging to later phases", () => {
     it("refuses to modify labels", async () => {
-      await expect(createGmailProvider(CONTEXT).modifyLabels("t", [], [])).rejects.toThrow(
-        /not implemented/,
-      );
+      await expect(
+        createGmailProvider(CONTEXT).modifyLabels("t", [], []),
+      ).rejects.toThrow(/not implemented/);
     });
   });
 });

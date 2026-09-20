@@ -76,7 +76,12 @@ export function reconcilePriority(
   const derived = bandFor(output.priorityScore);
   if (derived !== output.priority) {
     logger.warn(
-      { ...context, modelPriority: output.priority, priorityScore: output.priorityScore, derived },
+      {
+        ...context,
+        modelPriority: output.priority,
+        priorityScore: output.priorityScore,
+        derived,
+      },
       "classification priority disagreed with its own score; using the score",
     );
   }

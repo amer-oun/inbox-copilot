@@ -31,7 +31,9 @@ export default async function FollowUpsPage() {
       </Link>
 
       <header className="mt-4">
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Waiting on a reply</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-ink">
+          Waiting on a reply
+        </h1>
         <p className="mt-1 text-sm text-muted">
           {items.length === 0
             ? "Nothing is overdue."

@@ -12,7 +12,9 @@ const keypair = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
 const privateKey = createPrivateKey(keypair.privateKey);
-process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString("base64");
+process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString(
+  "base64",
+);
 
 const startBackfill = vi.hoisted(() => vi.fn());
 const getSyncStatus = vi.hoisted(() => vi.fn());
@@ -162,7 +164,13 @@ describe("GET /mail-accounts/:mailAccountId/sync-status", () => {
       .set("authorization", `Bearer ${await internalToken()}`);
 
     const raw = JSON.stringify(res.body);
-    for (const forbidden of ["accessToken", "refreshToken", "TokenEnc", "authTag", "syncCursor"]) {
+    for (const forbidden of [
+      "accessToken",
+      "refreshToken",
+      "TokenEnc",
+      "authTag",
+      "syncCursor",
+    ]) {
       expect(raw).not.toContain(forbidden);
     }
   });

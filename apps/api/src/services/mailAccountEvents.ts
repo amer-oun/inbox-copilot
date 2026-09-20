@@ -28,7 +28,9 @@ import type { Prisma } from "@inbox-copilot/db";
 /** The minimum shape this needs: a client, transactional or not. */
 type Writer = {
   mailAccountEvent: {
-    create: (args: { data: Prisma.MailAccountEventUncheckedCreateInput }) => Promise<unknown>;
+    create: (args: {
+      data: Prisma.MailAccountEventUncheckedCreateInput;
+    }) => Promise<unknown>;
   };
 };
 

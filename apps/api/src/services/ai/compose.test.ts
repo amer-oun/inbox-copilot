@@ -224,7 +224,13 @@ describe("finding prior correspondence", () => {
     const needle = values.find(
       (value): value is string => typeof value === "string" && value.startsWith("%"),
     );
-    expect(needle).toBe("%first" + String.fromCharCode(92) + "_last" + String.fromCharCode(92) + "%@example.test%");
+    expect(needle).toBe(
+      "%first" +
+        String.fromCharCode(92) +
+        "_last" +
+        String.fromCharCode(92) +
+        "%@example.test%",
+    );
   });
 
   it("reads the bodies back through the tenancy client, not out of the raw query", async () => {

@@ -14,10 +14,7 @@ const VERSION = process.env["npm_package_version"] ?? "0.1.0";
 /** Never let a hung socket hold the health check open. */
 const PING_TIMEOUT_MS = 2_000;
 
-async function timed(
-  name: string,
-  ping: () => Promise<void>,
-): Promise<DependencyHealth> {
+async function timed(name: string, ping: () => Promise<void>): Promise<DependencyHealth> {
   const startedAt = process.hrtime.bigint();
   const elapsed = () => Number(process.hrtime.bigint() - startedAt) / 1_000_000;
 

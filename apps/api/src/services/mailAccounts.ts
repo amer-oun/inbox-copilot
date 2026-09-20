@@ -172,7 +172,12 @@ export async function completeMailAccountConnect(input: {
     })) as SafeRow;
 
     log.info(
-      { mailAccountId: row.id, provider: providerType, requestId, audit: "mail-account-event" },
+      {
+        mailAccountId: row.id,
+        provider: providerType,
+        requestId,
+        audit: "mail-account-event",
+      },
       "reconnected existing mailbox",
     );
     return toDto(row);
@@ -208,16 +213,18 @@ export async function completeMailAccountConnect(input: {
     })) as SafeRow;
 
     log.info(
-      { mailAccountId: row.id, provider: providerType, requestId, audit: "mail-account-event" },
+      {
+        mailAccountId: row.id,
+        provider: providerType,
+        requestId,
+        audit: "mail-account-event",
+      },
       "connected new mailbox",
     );
     return toDto(row);
   } catch (error) {
     // Two consent screens completed at once: the loser updates instead.
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       const row = (await db.$transaction(async (tx) => {
         const updated = await tx.mailAccount.update({
           where: {
@@ -314,16 +321,14 @@ export async function disconnectMailAccount(input: {
     await tx.mailAccount.delete({ where: { id: existing.id } });
   });
 
-  logger
-    .child({ userId: input.userId, mailAccountId: input.mailAccountId })
-    .info(
-      {
-        revoked: outcome.revoked,
-        requestId: input.requestId ?? null,
-        audit: "mail-account-event",
-      },
-      "disconnected mailbox",
-    );
+  logger.child({ userId: input.userId, mailAccountId: input.mailAccountId }).info(
+    {
+      revoked: outcome.revoked,
+      requestId: input.requestId ?? null,
+      audit: "mail-account-event",
+    },
+    "disconnected mailbox",
+  );
 
   return outcome.manageUrl === undefined
     ? { revoked: outcome.revoked }

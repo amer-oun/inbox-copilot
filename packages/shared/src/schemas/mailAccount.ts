@@ -47,9 +47,7 @@ export const connectMailAccountResponseSchema = z.object({
   /** Provider consent URL. The browser is redirected here by the web app. */
   authorizeUrl: z.url(),
 });
-export type ConnectMailAccountResponse = z.infer<
-  typeof connectMailAccountResponseSchema
->;
+export type ConnectMailAccountResponse = z.infer<typeof connectMailAccountResponseSchema>;
 
 /**
  * Disconnect reports whether the provider grant was actually torn down. Google

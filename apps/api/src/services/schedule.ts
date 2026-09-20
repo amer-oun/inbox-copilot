@@ -172,7 +172,9 @@ export interface ScheduleReplyInput {
  * because a stranger replied in the meantime is the worse surprise, and on a thread
  * under §6 assessment it is also how a forged reply could redirect a queued answer.
  */
-export async function scheduleReply(input: ScheduleReplyInput): Promise<ScheduledEmailDto> {
+export async function scheduleReply(
+  input: ScheduleReplyInput,
+): Promise<ScheduledEmailDto> {
   const body = input.body.trim();
   if (body === "") throw new BadRequestError("A scheduled reply needs a body");
 
@@ -208,7 +210,10 @@ export async function scheduleReply(input: ScheduleReplyInput): Promise<Schedule
   const parent = thread.messages[0];
   if (parent === undefined) throw new NotFoundError("Thread has no messages");
 
-  const recipients = replyRecipients(parent as ReplyTarget, thread.mailAccount.emailAddress);
+  const recipients = replyRecipients(
+    parent as ReplyTarget,
+    thread.mailAccount.emailAddress,
+  );
 
   const row = await db.scheduledEmail.create({
     data: {
@@ -231,7 +236,12 @@ export async function scheduleReply(input: ScheduleReplyInput): Promise<Schedule
     select: SCHEDULED_SELECT,
   });
 
-  await enqueueScheduledSend({ scheduledEmailId: row.id, userId: input.userId, sendAt, now });
+  await enqueueScheduledSend({
+    scheduledEmailId: row.id,
+    userId: input.userId,
+    sendAt,
+    now,
+  });
 
   logger.info(
     {
@@ -311,7 +321,12 @@ export async function scheduleNewMessage(
     select: SCHEDULED_SELECT,
   });
 
-  await enqueueScheduledSend({ scheduledEmailId: row.id, userId: input.userId, sendAt, now });
+  await enqueueScheduledSend({
+    scheduledEmailId: row.id,
+    userId: input.userId,
+    sendAt,
+    now,
+  });
 
   logger.info(
     {
@@ -331,7 +346,9 @@ export async function scheduleNewMessage(
 
 /** `RawAddress` back to the `"Name <addr>"` form `ScheduledEmail.to` stores. */
 function formatAddress(address: RawAddress): string {
-  return address.name === undefined ? address.email : `${address.name} <${address.email}>`;
+  return address.name === undefined
+    ? address.email
+    : `${address.name} <${address.email}>`;
 }
 
 /**
@@ -496,7 +513,10 @@ export async function runScheduledSend(
 ): Promise<RunScheduledSendResult> {
   const now = options.now ?? new Date();
   const db = dbForUser(job.userId);
-  const log = logger.child({ userId: job.userId, scheduledEmailId: job.scheduledEmailId });
+  const log = logger.child({
+    userId: job.userId,
+    scheduledEmailId: job.scheduledEmailId,
+  });
 
   const row = await db.scheduledEmail.findFirst({
     where: { id: job.scheduledEmailId },
@@ -708,7 +728,11 @@ async function threadingFor(
   userId: string,
   threadId: string | null,
   parentMessageId: string | null,
-): Promise<{ providerThreadId: string; internetMessageId: string; references: string[] } | null> {
+): Promise<{
+  providerThreadId: string;
+  internetMessageId: string;
+  references: string[];
+} | null> {
   if (threadId === null || parentMessageId === null) return null;
 
   const db = dbForUser(userId);
@@ -761,7 +785,10 @@ export async function sweepDueScheduledEmails(
 ): Promise<SweepResult> {
   const now = options.now ?? new Date();
   const due = await prisma.scheduledEmail.findMany({
-    where: { status: "SCHEDULED", sendAt: { lte: new Date(now.getTime() + SWEEP_LEAD_MS) } },
+    where: {
+      status: "SCHEDULED",
+      sendAt: { lte: new Date(now.getTime() + SWEEP_LEAD_MS) },
+    },
     orderBy: { sendAt: "asc" },
     take: options.limit ?? SWEEP_BATCH,
     select: { id: true, userId: true, sendAt: true },
@@ -779,7 +806,10 @@ export async function sweepDueScheduledEmails(
   }
 
   if (due.length > 0) {
-    logger.info({ found: due.length, queued }, "scheduled-send sweep re-enqueued overdue sends");
+    logger.info(
+      { found: due.length, queued },
+      "scheduled-send sweep re-enqueued overdue sends",
+    );
   }
 
   return { found: due.length, queued };

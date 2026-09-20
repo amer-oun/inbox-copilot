@@ -17,7 +17,9 @@ const keypair = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
 const privateKey = createPrivateKey(keypair.privateKey);
-process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString("base64");
+process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString(
+  "base64",
+);
 
 const recordThreatAppeal = vi.hoisted(() => vi.fn());
 
@@ -30,7 +32,10 @@ vi.mock("../services/ai/style.js", () => ({
   getWritingStyle: vi.fn(),
 }));
 vi.mock("../services/threads.js", () => ({ listThreads: vi.fn(), getThread: vi.fn() }));
-vi.mock("../services/sync.js", () => ({ startBackfill: vi.fn(), getSyncStatus: vi.fn() }));
+vi.mock("../services/sync.js", () => ({
+  startBackfill: vi.fn(),
+  getSyncStatus: vi.fn(),
+}));
 vi.mock("../services/mailAccounts.js", () => ({
   listMailAccounts: vi.fn(),
   startMailAccountConnect: vi.fn(),

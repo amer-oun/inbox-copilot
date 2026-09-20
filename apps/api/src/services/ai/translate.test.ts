@@ -37,7 +37,8 @@ const callStructured = vi.hoisted(() => vi.fn());
 
 vi.mock("./client.js", () => ({ callStructured }));
 
-const { normalizeLang, resolveTargetLang, translateMessage } = await import("./translate.js");
+const { normalizeLang, resolveTargetLang, translateMessage } =
+  await import("./translate.js");
 const { BadRequestError, NotFoundError } = await import("../../lib/errors.js");
 
 const USER_ID = "user_1";
@@ -78,7 +79,12 @@ beforeEach(() => {
       translatedText: "Hello, could you settle the invoice before Friday?",
     },
     model: "claude-sonnet-5",
-    tokens: { inputTokens: 100, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    tokens: {
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
   });
 });
 
@@ -110,7 +116,9 @@ describe("the cache", () => {
     expect(callStructured).not.toHaveBeenCalled();
     expect(translationUpsert).not.toHaveBeenCalled();
     expect(result.fromCache).toBe(true);
-    expect(result.translatedText).toBe("Hello, could you settle the invoice before Friday?");
+    expect(result.translatedText).toBe(
+      "Hello, could you settle the invoice before Friday?",
+    );
   });
 
   it("is keyed on the message and the language together", async () => {
@@ -164,7 +172,11 @@ describe("the cache", () => {
   it("treats fr-CA and fr-ca as one language, not two cache rows", async () => {
     // The tag is half of a unique key. Two spellings would be two rows and two Sonnet
     // calls for the same answer.
-    await translateMessage({ userId: USER_ID, messageId: MESSAGE_ID, targetLang: "FR-CA" });
+    await translateMessage({
+      userId: USER_ID,
+      messageId: MESSAGE_ID,
+      targetLang: "FR-CA",
+    });
 
     expect(normalizeLang("FR-CA")).toBe("fr-ca");
     expect(translationFindFirst.mock.calls[0]?.[0].where.targetLang).toBe("fr-ca");

@@ -25,12 +25,62 @@ import DOMPurify from "isomorphic-dompurify";
 
 /** Tags an email may use. Everything else is dropped, contents kept. */
 const ALLOWED_TAGS = [
-  "a", "abbr", "b", "bdi", "bdo", "blockquote", "br", "caption", "center", "cite",
-  "code", "col", "colgroup", "dd", "del", "div", "dl", "dt", "em", "figcaption",
-  "figure", "font", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "img", "ins",
-  "li", "mark", "ol", "p", "pre", "q", "s", "small", "span", "strike", "strong",
-  "sub", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "time", "tr", "u",
-  "ul", "wbr",
+  "a",
+  "abbr",
+  "b",
+  "bdi",
+  "bdo",
+  "blockquote",
+  "br",
+  "caption",
+  "center",
+  "cite",
+  "code",
+  "col",
+  "colgroup",
+  "dd",
+  "del",
+  "div",
+  "dl",
+  "dt",
+  "em",
+  "figcaption",
+  "figure",
+  "font",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "hr",
+  "i",
+  "img",
+  "ins",
+  "li",
+  "mark",
+  "ol",
+  "p",
+  "pre",
+  "q",
+  "s",
+  "small",
+  "span",
+  "strike",
+  "strong",
+  "sub",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "time",
+  "tr",
+  "u",
+  "ul",
+  "wbr",
 ];
 
 /**
@@ -41,9 +91,31 @@ const ALLOWED_TAGS = [
  * below with our own values rather than the sender's.
  */
 const ALLOWED_ATTR = [
-  "align", "alt", "background", "bgcolor", "border", "cellpadding", "cellspacing",
-  "class", "colspan", "color", "dir", "face", "height", "href", "hreflang", "lang",
-  "poster", "rowspan", "size", "span", "src", "srcset", "style", "title", "valign",
+  "align",
+  "alt",
+  "background",
+  "bgcolor",
+  "border",
+  "cellpadding",
+  "cellspacing",
+  "class",
+  "colspan",
+  "color",
+  "dir",
+  "face",
+  "height",
+  "href",
+  "hreflang",
+  "lang",
+  "poster",
+  "rowspan",
+  "size",
+  "span",
+  "src",
+  "srcset",
+  "style",
+  "title",
+  "valign",
   "width",
 ];
 
@@ -67,8 +139,21 @@ const ALLOWED_URI_REGEXP =
  * With the default regexp they survive by accident; that accident is not a design.
  */
 const URI_SAFE_ATTR = [
-  "align", "bgcolor", "border", "cellpadding", "cellspacing", "color", "colspan",
-  "face", "height", "hreflang", "rowspan", "size", "span", "valign", "width",
+  "align",
+  "bgcolor",
+  "border",
+  "cellpadding",
+  "cellspacing",
+  "color",
+  "colspan",
+  "face",
+  "height",
+  "hreflang",
+  "rowspan",
+  "size",
+  "span",
+  "valign",
+  "width",
 ];
 
 /** Attributes that can pull remote content, and must be defused. */
@@ -152,7 +237,8 @@ export function sanitizeEmailHtml(html: string | null): SanitizedHtml | null {
     if (style !== null && /url\(/i.test(style)) {
       const cleaned = style.replace(
         /url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi,
-        (match: string, _quote: string, url: string) => (isRemoteUrl(url) ? "none" : match),
+        (match: string, _quote: string, url: string) =>
+          isRemoteUrl(url) ? "none" : match,
       );
       if (cleaned !== style) {
         node.setAttribute("style", cleaned);
@@ -186,8 +272,23 @@ export function sanitizeEmailHtml(html: string | null): SanitizedHtml | null {
       ADD_ATTR: ["target", "rel"],
       // `<style>` blocks and their contents go entirely: they are a CSS injection
       // surface and can load remote fonts and images.
-      FORBID_TAGS: ["style", "script", "iframe", "object", "embed", "form", "input",
-        "button", "select", "textarea", "link", "meta", "base", "svg", "math"],
+      FORBID_TAGS: [
+        "style",
+        "script",
+        "iframe",
+        "object",
+        "embed",
+        "form",
+        "input",
+        "button",
+        "select",
+        "textarea",
+        "link",
+        "meta",
+        "base",
+        "svg",
+        "math",
+      ],
       FORBID_ATTR: ["srcdoc", "formaction", "action", "ping", "id", "name"],
       // No `<html>`/`<body>` wrapper: this is embedded in one we build ourselves.
       WHOLE_DOCUMENT: false,

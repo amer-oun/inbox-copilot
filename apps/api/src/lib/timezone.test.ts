@@ -128,7 +128,9 @@ describe("zonedWallTimeToUtc", () => {
     expect(() => zonedWallTimeToUtc("2026-09-20T09:00:00Z", "Africa/Tunis")).toThrow(
       BadRequestError,
     );
-    expect(() => zonedWallTimeToUtc("2026-09-20", "Africa/Tunis")).toThrow(BadRequestError);
+    expect(() => zonedWallTimeToUtc("2026-09-20", "Africa/Tunis")).toThrow(
+      BadRequestError,
+    );
     expect(() => zonedWallTimeToUtc("2026-13-40T99:99", "Africa/Tunis")).toThrow(
       BadRequestError,
     );

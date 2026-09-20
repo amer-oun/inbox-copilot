@@ -39,7 +39,11 @@ function get(path: string, query = ""): Request {
   return new Request(`${ORIGIN}/api/proxy/${path}${query}`);
 }
 
-function post(path: string, body: unknown, headers: Record<string, string> = {}): Request {
+function post(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Request {
   return new Request(`${ORIGIN}/api/proxy/${path}`, {
     method: "POST",
     headers: { origin: ORIGIN, "content-type": "application/json", ...headers },
@@ -220,7 +224,12 @@ describe("writes", () => {
   });
 
   it("refuses to post to a path that is not on the write list", async () => {
-    for (const path of ["threads", `threads/${THREAD_ID}`, "mail-accounts/x/sync", "send"]) {
+    for (const path of [
+      "threads",
+      `threads/${THREAD_ID}`,
+      "mail-accounts/x/sync",
+      "send",
+    ]) {
       const response = await POST(post(path, {}), params(path));
       expect(response.status).toBe(404);
     }

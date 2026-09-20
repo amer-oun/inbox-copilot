@@ -13,9 +13,7 @@ import { auth } from "../auth";
 export async function requireSession(returnTo?: string): Promise<Session> {
   const session = await auth();
   if (!session?.user?.id) {
-    const target = returnTo
-      ? `/signin?next=${encodeURIComponent(returnTo)}`
-      : "/signin";
+    const target = returnTo ? `/signin?next=${encodeURIComponent(returnTo)}` : "/signin";
     redirect(target);
   }
   return session;

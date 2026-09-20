@@ -23,7 +23,10 @@ import { Button } from "../ui/button";
  */
 
 const STATUS_COPY: Readonly<
-  Record<ScheduledEmailDto["status"], { label: string; tone: "neutral" | "info" | "danger" }>
+  Record<
+    ScheduledEmailDto["status"],
+    { label: string; tone: "neutral" | "info" | "danger" }
+  >
 > = {
   SCHEDULED: { label: "Scheduled", tone: "info" },
   SENDING: { label: "Sending now", tone: "info" },
@@ -105,12 +108,15 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
       */}
       {item.status === "FAILED" && (
         <p className="mt-2 flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-ink">
-          <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-danger" />
+          <CircleAlert
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0 text-danger"
+          />
           <span>
             {`This did not go out${item.lastError === null ? "." : `: ${item.lastError}`} `}
-            It was not retried automatically, because a send that fails after the
-            provider may already have accepted it could deliver twice. Send it again
-            yourself if it is still needed.
+            It was not retried automatically, because a send that fails after the provider
+            may already have accepted it could deliver twice. Send it again yourself if it
+            is still needed.
           </span>
         </p>
       )}

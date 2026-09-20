@@ -65,7 +65,9 @@ function formatWhen(iso: string, now: Date = new Date()): string {
 export function ThreadRow({ thread }: { thread: ThreadListItemDto }) {
   const senderName = thread.from?.name ?? thread.from?.email ?? "(unknown sender)";
   const priorityLabel =
-    thread.priority === null ? "Not yet prioritised" : PRIORITY_STYLES[thread.priority].label;
+    thread.priority === null
+      ? "Not yet prioritised"
+      : PRIORITY_STYLES[thread.priority].label;
 
   return (
     <li className="border-b border-border-subtle last:border-b-0">
@@ -94,13 +96,20 @@ export function ThreadRow({ thread }: { thread: ThreadListItemDto }) {
             )}
             <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted">
               {thread.threatLevel !== "UNKNOWN" && thread.threatLevel !== "SAFE" && (
-                <ShieldAlert aria-label="Flagged as suspicious" className="size-3.5 text-danger" />
+                <ShieldAlert
+                  aria-label="Flagged as suspicious"
+                  className="size-3.5 text-danger"
+                />
               )}
-              {thread.needsReply && <Reply aria-label="Needs a reply" className="size-3.5" />}
+              {thread.needsReply && (
+                <Reply aria-label="Needs a reply" className="size-3.5" />
+              )}
               {thread.hasAttachments && (
                 <Paperclip aria-label="Has attachments" className="size-3.5" />
               )}
-              <time dateTime={thread.lastMessageAt}>{formatWhen(thread.lastMessageAt)}</time>
+              <time dateTime={thread.lastMessageAt}>
+                {formatWhen(thread.lastMessageAt)}
+              </time>
             </span>
           </span>
 

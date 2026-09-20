@@ -81,15 +81,22 @@ const LONG_ENOUGH =
 beforeEach(() => {
   resetAnthropicClient();
   create.mockReset().mockResolvedValue(styleResponse);
-  messageFindMany.mockReset().mockResolvedValue([
-    sent(1, LONG_ENOUGH),
-    sent(2, "Happy to help. The renewal date can move if that suits your budget cycle."),
-    sent(3, "No change needed on my side. I will confirm once the PO is updated."),
-  ]);
+  messageFindMany
+    .mockReset()
+    .mockResolvedValue([
+      sent(1, LONG_ENOUGH),
+      sent(
+        2,
+        "Happy to help. The renewal date can move if that suits your budget cycle.",
+      ),
+      sent(3, "No change needed on my side. I will confirm once the PO is updated."),
+    ]);
   styleFindFirst.mockReset().mockResolvedValue(null);
-  styleUpsert.mockReset().mockImplementation(({ create: row }: { create: object }) =>
-    Promise.resolve({ ...row, updatedAt: new Date("2026-09-13T10:00:00Z") }),
-  );
+  styleUpsert
+    .mockReset()
+    .mockImplementation(({ create: row }: { create: object }) =>
+      Promise.resolve({ ...row, updatedAt: new Date("2026-09-13T10:00:00Z") }),
+    );
   usageCreate.mockReset().mockResolvedValue({});
   usageCount.mockReset().mockResolvedValue(0);
   settingsFindFirst.mockReset().mockResolvedValue({
@@ -120,9 +127,12 @@ describe("stripQuotedText", () => {
 
   it("drops an Outlook-style quoted header block", () => {
     const out = stripQuotedText(
-      ["Sorted, thanks.", "", "From: Dana <dana@northwind.example>", "Sent: Thursday"].join(
-        "\n",
-      ),
+      [
+        "Sorted, thanks.",
+        "",
+        "From: Dana <dana@northwind.example>",
+        "Sent: Thursday",
+      ].join("\n"),
     );
     expect(out).toBe("Sorted, thanks.");
   });
@@ -130,9 +140,14 @@ describe("stripQuotedText", () => {
   it("keeps the sign-off but cuts the signature block", () => {
     // The sign-off is one of the fields being profiled, so the cut is at `-- `.
     const out = stripQuotedText(
-      ["Will do.", "", "Best,", "Sam", "-- ", "Sam Okafor | Northwind | +44 20 7000 0000"].join(
-        "\n",
-      ),
+      [
+        "Will do.",
+        "",
+        "Best,",
+        "Sam",
+        "-- ",
+        "Sam Okafor | Northwind | +44 20 7000 0000",
+      ].join("\n"),
     );
 
     expect(out).toContain("Best,");
@@ -166,7 +181,9 @@ describe("stripQuotedText", () => {
 describe("averageSentenceLength", () => {
   it("averages words per sentence", () => {
     // 4 words + 6 words over two sentences.
-    expect(averageSentenceLength(["One two three four. Five six seven eight nine ten."])).toBe(5);
+    expect(
+      averageSentenceLength(["One two three four. Five six seven eight nine ten."]),
+    ).toBe(5);
   });
 
   it("ignores one-word fragments, which are list items rather than sentences", () => {
@@ -347,7 +364,11 @@ describe("loadWritingStyle", () => {
 describe("enqueueStyleProfile", () => {
   it("queues one job per user", async () => {
     expect(await enqueueStyleProfile({ userId: USER_ID })).toBe(true);
-    expect(queueAdd).toHaveBeenCalledWith("style", { userId: USER_ID }, { jobId: "style-user_1" });
+    expect(queueAdd).toHaveBeenCalledWith(
+      "style",
+      { userId: USER_ID },
+      { jobId: "style-user_1" },
+    );
   });
 
   it("leaves a pending job alone", async () => {

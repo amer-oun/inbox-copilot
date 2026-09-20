@@ -49,9 +49,9 @@ describe("withMutex", () => {
   });
 
   it("releases the lock when the function throws", async () => {
-    await expect(withMutex("thing", async () => Promise.reject(new Error("boom")))).rejects.toThrow(
-      "boom",
-    );
+    await expect(
+      withMutex("thing", async () => Promise.reject(new Error("boom"))),
+    ).rejects.toThrow("boom");
     expect(store.size).toBe(0);
   });
 
@@ -59,14 +59,22 @@ describe("withMutex", () => {
     const order: string[] = [];
 
     await Promise.all([
-      withMutex("same", async () => {
-        order.push("first-in");
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        order.push("first-out");
-      }, { retryDelayMs: 1 }),
-      withMutex("same", async () => {
-        order.push("second-in");
-      }, { retryDelayMs: 1 }),
+      withMutex(
+        "same",
+        async () => {
+          order.push("first-in");
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          order.push("first-out");
+        },
+        { retryDelayMs: 1 },
+      ),
+      withMutex(
+        "same",
+        async () => {
+          order.push("second-in");
+        },
+        { retryDelayMs: 1 },
+      ),
     ]);
 
     // The second body cannot start before the first finished.

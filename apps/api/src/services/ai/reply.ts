@@ -8,7 +8,11 @@ import {
 import { NotFoundError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import { callStructured } from "./client.js";
-import { threadForPrompt, MESSAGE_PROMPT_SELECT, type MessageForPrompt } from "./content.js";
+import {
+  threadForPrompt,
+  MESSAGE_PROMPT_SELECT,
+  type MessageForPrompt,
+} from "./content.js";
 import { replyRequestBlock, untrustedThreadBlock } from "./prompts.js";
 import { loadWritingStyle } from "./style.js";
 import { loadAiSettings, type AiSettings } from "./usage.js";

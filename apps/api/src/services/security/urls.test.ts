@@ -31,7 +31,9 @@ describe("registrableDomain", () => {
 
   it("does not let a suffix-shaped subdomain impersonate a party", () => {
     // The classic: the real registrable domain here is the attacker's.
-    expect(registrableDomain("paypal.com.secure-login.example")).toBe("secure-login.example");
+    expect(registrableDomain("paypal.com.secure-login.example")).toBe(
+      "secure-login.example",
+    );
   });
 
   it("knows the multi-label suffixes that appear in real mail", () => {
@@ -173,14 +175,19 @@ describe("extractLinks", () => {
   });
 
   it("reads unquoted and single-quoted hrefs", () => {
-    expect(extractLinks(`<a href=https://a.test>a</a><a href='https://b.test'>b</a>`, null)).toEqual([
+    expect(
+      extractLinks(`<a href=https://a.test>a</a><a href='https://b.test'>b</a>`, null),
+    ).toEqual([
       { href: "https://a.test", shown: "a" },
       { href: "https://b.test", shown: "b" },
     ]);
   });
 
   it("strips nested markup out of the visible text", () => {
-    const links = extractLinks(`<a href="https://a.test"><span>click</span> <b>here</b></a>`, null);
+    const links = extractLinks(
+      `<a href="https://a.test"><span>click</span> <b>here</b></a>`,
+      null,
+    );
     expect(links[0]?.shown).toBe("click here");
   });
 
@@ -276,7 +283,11 @@ describe("urlSignals", () => {
       (_, index) => `<a href="http://203.0.113.9/t/${index}">x</a>`,
     ).join("");
 
-    const signals = urlSignals({ bodyHtml: anchors, bodyText: null, knownDomains: known });
+    const signals = urlSignals({
+      bodyHtml: anchors,
+      bodyText: null,
+      knownDomains: known,
+    });
 
     expect(signals.rawIpHosts).toHaveLength(1);
     expect(signals.linkCount).toBe(1);

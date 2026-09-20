@@ -96,7 +96,11 @@ webhooksRouter.post("/webhooks/gmail", async (req, res) => {
   }
 
   log.info(
-    { queued, collapsed: mailboxes.length - queued, claimedHistoryId: notification.claimedHistoryId },
+    {
+      queued,
+      collapsed: mailboxes.length - queued,
+      claimedHistoryId: notification.claimedHistoryId,
+    },
     "gmail push accepted",
   );
 

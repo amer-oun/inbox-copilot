@@ -124,9 +124,7 @@ describe("the OAuth callback code never reaches a log line", () => {
       new FakeInvalidOAuthStateError("state already used or expired"),
     );
 
-    await request(createApp()).get(
-      `/oauth/google/callback?code=${CODE}&state=replayed`,
-    );
+    await request(createApp()).get(`/oauth/google/callback?code=${CODE}&state=replayed`);
 
     expectSomethingWasLogged();
     // This path logs a warning of its own; it must stay code-free too.

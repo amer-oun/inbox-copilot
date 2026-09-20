@@ -40,7 +40,10 @@ describe("promptBody", () => {
 
   it("extracts text from HTML when there is no plain part", () => {
     const body = promptBody(
-      msg({ bodyText: null, bodyHtml: "<p>Hello <b>there</b></p><script>alert(1)</script>" }),
+      msg({
+        bodyText: null,
+        bodyHtml: "<p>Hello <b>there</b></p><script>alert(1)</script>",
+      }),
     );
 
     expect(body).toContain("Hello");
@@ -49,9 +52,9 @@ describe("promptBody", () => {
   });
 
   it("falls back to the snippet rather than sending nothing", () => {
-    expect(promptBody(msg({ bodyText: null, bodyHtml: null, snippet: "just a snippet" }))).toBe(
-      "just a snippet",
-    );
+    expect(
+      promptBody(msg({ bodyText: null, bodyHtml: null, snippet: "just a snippet" })),
+    ).toBe("just a snippet");
   });
 
   it("returns an empty string when the message has no text at all", () => {
@@ -137,13 +140,18 @@ describe("needsSummary", () => {
   });
 
   it("considers the snippet when there is no body", () => {
-    expect(needsSummary([msg({ bodyText: null, snippet: "x".repeat(1_501) })])).toBe(true);
+    expect(needsSummary([msg({ bodyText: null, snippet: "x".repeat(1_501) })])).toBe(
+      true,
+    );
   });
 });
 
 describe("threadForPrompt", () => {
   it("keeps order oldest-first", () => {
-    const blocks = threadForPrompt([msg({ bodyText: "one" }), msg({ bodyText: "two" })], "me@x.example");
+    const blocks = threadForPrompt(
+      [msg({ bodyText: "one" }), msg({ bodyText: "two" })],
+      "me@x.example",
+    );
     expect(blocks.map((block) => block.body)).toEqual(["one", "two"]);
   });
 
@@ -171,7 +179,10 @@ describe("threadForPrompt", () => {
   });
 
   it("always keeps at least the newest message, even if it alone is over budget", () => {
-    const blocks = threadForPrompt([msg({ bodyText: "x".repeat(MAX_BODY_CHARS * 4) })], "me@x.example");
+    const blocks = threadForPrompt(
+      [msg({ bodyText: "x".repeat(MAX_BODY_CHARS * 4) })],
+      "me@x.example",
+    );
     expect(blocks).toHaveLength(1);
   });
 });

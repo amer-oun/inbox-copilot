@@ -63,7 +63,10 @@ export function capWindowStart(now: Date = new Date()): Date {
 }
 
 /** Calls this user has made in the current window. */
-export async function callsToday(userId: string, now: Date = new Date()): Promise<number> {
+export async function callsToday(
+  userId: string,
+  now: Date = new Date(),
+): Promise<number> {
   return dbForUser(userId).aiUsage.count({
     where: { userId, createdAt: { gte: capWindowStart(now) } },
   });

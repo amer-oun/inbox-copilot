@@ -55,5 +55,7 @@ followUpsRouter.post("/follow-ups/:reminderId/snooze", async (req, res) => {
   const { reminderId } = followUpIdParamsSchema.parse(req.params);
   const { days } = snoozeFollowUpBodySchema.parse(req.body ?? {});
 
-  res.json(followUpReminderSchema.parse(await snoozeReminder({ userId, reminderId, days })));
+  res.json(
+    followUpReminderSchema.parse(await snoozeReminder({ userId, reminderId, days })),
+  );
 });

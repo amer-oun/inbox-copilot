@@ -65,4 +65,3 @@ export function redactUrl(url: string | undefined): string | undefined {
   const query = params.toString();
   return query.length > 0 ? `${path}?${query}` : path;
 }
-

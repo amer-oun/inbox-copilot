@@ -166,13 +166,15 @@ export function firedRules(signals: SignalSet): FiredRule[] {
       fired.push({
         id: "spf-softfail",
         weight: 10,
-        reason: "SPF soft-failed: the sending server is not one the domain lists, only tolerated.",
+        reason:
+          "SPF soft-failed: the sending server is not one the domain lists, only tolerated.",
       });
     } else if (header.spf === null) {
       fired.push({
         id: "spf-missing",
         weight: 6,
-        reason: "No SPF result: the sending server was not checked against the domain's list.",
+        reason:
+          "No SPF result: the sending server was not checked against the domain's list.",
       });
     }
 
@@ -225,7 +227,8 @@ export function firedRules(signals: SignalSet): FiredRule[] {
     fired.push({
       id: "return-path-unknown",
       weight: 5,
-      reason: "No delivery path was recorded, so where the message was actually sent from is unknown.",
+      reason:
+        "No delivery path was recorded, so where the message was actually sent from is unknown.",
     });
   }
 
@@ -402,7 +405,9 @@ export function evaluateRules(signals: SignalSet): RuleSignals {
  * lower number — whereas a level is a four-way judgment that the union can handle. A
  * model SAFE contributes 0, which cannot lower anything the rules found.
  */
-const MODEL_LEVEL_SCORE: Readonly<Record<AiThreatAssessmentOutput["assessedLevel"], number>> = {
+const MODEL_LEVEL_SCORE: Readonly<
+  Record<AiThreatAssessmentOutput["assessedLevel"], number>
+> = {
   SAFE: 0,
   SPAM: 40,
   SUSPICIOUS: 60,
@@ -411,7 +416,8 @@ const MODEL_LEVEL_SCORE: Readonly<Record<AiThreatAssessmentOutput["assessedLevel
 
 /** How an intent reads in a reason line, when the model's judgment raised the verdict. */
 const INTENT_REASON: Readonly<Record<ThreatIntent, string>> = {
-  CREDENTIAL_HARVEST: "reads as an attempt to get you to enter a password or a login code",
+  CREDENTIAL_HARVEST:
+    "reads as an attempt to get you to enter a password or a login code",
   BEC: "reads as someone impersonating a colleague to get an action out of you",
   INVOICE_FRAUD: "reads as a false or altered payment request",
   MALWARE: "reads as an attempt to get you to open a file",
@@ -532,7 +538,9 @@ export async function collectSignals(input: {
     replyTo: message.replyTo,
   });
 
-  const fromHost = message.fromEmail.slice(message.fromEmail.lastIndexOf("@") + 1).toLowerCase();
+  const fromHost = message.fromEmail
+    .slice(message.fromEmail.lastIndexOf("@") + 1)
+    .toLowerCase();
 
   const sender: SenderSignals = {
     messagesSeenFrom: seen,
@@ -550,10 +558,14 @@ export async function collectSignals(input: {
     }),
     sender,
     attachments: message.attachments
-      .filter((attachment): attachment is { filename: string; riskFlag: string } =>
-        attachment.riskFlag !== null,
+      .filter(
+        (attachment): attachment is { filename: string; riskFlag: string } =>
+          attachment.riskFlag !== null,
       )
-      .map((attachment) => ({ filename: attachment.filename, riskFlag: attachment.riskFlag })),
+      .map((attachment) => ({
+        filename: attachment.filename,
+        riskFlag: attachment.riskFlag,
+      })),
   };
 }
 
@@ -734,7 +746,11 @@ export async function assessMessageThreat(
       ].join("\n\n"),
       ...(input.settings ? { settings: input.settings } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
-      logContext: { messageId: message.id, ruleScore: rules.score, ruleFloor: rules.floor },
+      logContext: {
+        messageId: message.id,
+        ruleScore: rules.score,
+        ruleFloor: rules.floor,
+      },
     });
 
     assessment = called.data;
@@ -824,7 +840,9 @@ function threatMetadata(
   mailboxAddress: string,
 ): Record<string, string | number | boolean | null> {
   return {
-    from: message.fromName ? `${message.fromName} <${message.fromEmail}>` : message.fromEmail,
+    from: message.fromName
+      ? `${message.fromName} <${message.fromEmail}>`
+      : message.fromEmail,
     from_domain: registrableDomain(
       message.fromEmail.slice(message.fromEmail.lastIndexOf("@") + 1),
     ),

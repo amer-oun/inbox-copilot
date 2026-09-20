@@ -31,9 +31,8 @@ const mutexState = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/mutex.js", async () => {
-  const actual = await vi.importActual<typeof import("../../lib/mutex.js")>(
-    "../../lib/mutex.js",
-  );
+  const actual =
+    await vi.importActual<typeof import("../../lib/mutex.js")>("../../lib/mutex.js");
 
   return {
     MutexTimeoutError: actual.MutexTimeoutError,
@@ -105,7 +104,10 @@ function msg(index: number, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function summarize(messages: ReturnType<typeof msg>[], overrides: Record<string, unknown> = {}) {
+function summarize(
+  messages: ReturnType<typeof msg>[],
+  overrides: Record<string, unknown> = {},
+) {
   return summarizeThread({
     userId: USER_ID,
     threadId: THREAD_ID,
@@ -195,7 +197,9 @@ describe("summarizeThread", () => {
 
     expect(content.split(UNTRUSTED_OPEN)).toHaveLength(4);
     expect(content.split(UNTRUSTED_CLOSE)).toHaveLength(4);
-    expect(content.indexOf("Message 1 body")).toBeLessThan(content.indexOf("Message 3 body"));
+    expect(content.indexOf("Message 1 body")).toBeLessThan(
+      content.indexOf("Message 3 body"),
+    );
   });
 
   it("writes the summary keyed on the thread content hash", async () => {

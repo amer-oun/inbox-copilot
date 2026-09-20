@@ -7,7 +7,11 @@ import {
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import { callStructured } from "./client.js";
-import { MESSAGE_PROMPT_SELECT, messageForPrompt, type MessageForPrompt } from "./content.js";
+import {
+  MESSAGE_PROMPT_SELECT,
+  messageForPrompt,
+  type MessageForPrompt,
+} from "./content.js";
 import { translationRequestBlock, untrustedEmailBlock } from "./prompts.js";
 import type { AiSettings } from "./usage.js";
 
@@ -127,9 +131,10 @@ export async function translateMessage(
     schema: aiTranslationSchema,
     // Our instruction block last, as everywhere else in this layer: the final thing the
     // model reads must be ours rather than the sender's.
-    userContent: [untrustedEmailBlock(prompt), translationRequestBlock({ targetLang })].join(
-      "\n",
-    ),
+    userContent: [
+      untrustedEmailBlock(prompt),
+      translationRequestBlock({ targetLang }),
+    ].join("\n"),
     ...(input.settings ? { settings: input.settings } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     logContext: { messageId: input.messageId, targetLang },

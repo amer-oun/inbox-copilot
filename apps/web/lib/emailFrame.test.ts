@@ -139,7 +139,7 @@ describe("restoreBlockedImages", () => {
   });
 
   it("leaves a body with nothing parked untouched in substance", () => {
-    const out = restoreBlockedImages('<p>hello <b>world</b></p>');
+    const out = restoreBlockedImages("<p>hello <b>world</b></p>");
     expect(out).toBe("<p>hello <b>world</b></p>");
   });
 
@@ -172,6 +172,8 @@ describe("the frame document", () => {
   });
 
   it("handles an empty body", () => {
-    expect(() => buildEmailFrameSrcDoc({ html: "", loadRemoteImages: false })).not.toThrow();
+    expect(() =>
+      buildEmailFrameSrcDoc({ html: "", loadRemoteImages: false }),
+    ).not.toThrow();
   });
 });

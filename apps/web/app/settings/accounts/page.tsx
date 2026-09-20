@@ -49,8 +49,7 @@ const MICROSOFT_CONSENT_URL = "https://myapplications.microsoft.com/";
 /** Stable codes from the API callback (routes/oauth.ts), phrased here. */
 const CALLBACK_ERRORS: Record<string, string> = {
   denied: "You declined the permission request, so nothing was connected.",
-  invalid_state:
-    "That connection link expired or was already used. Please start again.",
+  invalid_state: "That connection link expired or was already used. Please start again.",
   provider_error: "The provider reported an error. Please try again.",
   failed:
     "We could not finish connecting the mailbox. Nothing was saved — please try again.",
@@ -93,7 +92,9 @@ function SyncProgress({ status }: { status: SyncStatusResponse | undefined }) {
           <dt>Job</dt>
           <dd className="text-ink">
             {job.state}
-            {job.threadsProcessed === null ? "" : ` · ${job.threadsProcessed} threads processed`}
+            {job.threadsProcessed === null
+              ? ""
+              : ` · ${job.threadsProcessed} threads processed`}
             {job.attemptsMade > 1 ? ` · attempt ${job.attemptsMade}` : ""}
           </dd>
         </>
@@ -137,7 +138,9 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
     ),
   );
 
-  const errorMessage = error ? (CALLBACK_ERRORS[error] ?? CALLBACK_ERRORS["failed"]) : null;
+  const errorMessage = error
+    ? (CALLBACK_ERRORS[error] ?? CALLBACK_ERRORS["failed"])
+    : null;
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-12">
@@ -151,9 +154,8 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
 
       <h1 className="text-2xl font-semibold tracking-tight">Connected mailboxes</h1>
       <p className="mt-1 max-w-prose text-sm text-muted">
-        Connecting a mailbox is separate from signing in. Sync starts only after
-        you grant access here, and Inbox Copilot never sends mail without you
-        pressing send.
+        Connecting a mailbox is separate from signing in. Sync starts only after you grant
+        access here, and Inbox Copilot never sends mail without you pressing send.
       </p>
 
       {connected ? (
@@ -162,8 +164,8 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
           className="mt-6 flex items-start gap-2 rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success"
         >
           <CheckCircle2 aria-hidden className="mt-0.5 size-4 shrink-0" />
-          Connected {connected}. The first sync is queued: it backfills the last 90
-          days, then keeps up in the background.
+          Connected {connected}. The first sync is queued: it backfills the last 90 days,
+          then keeps up in the background.
         </p>
       ) : null}
 
@@ -184,9 +186,9 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
         >
           <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
           <span>
-            Mailbox disconnected and our copy of your tokens deleted. Microsoft does
-            not let an app revoke its own access, so the permission itself is still
-            listed on your account —{" "}
+            Mailbox disconnected and our copy of your tokens deleted. Microsoft does not
+            let an app revoke its own access, so the permission itself is still listed on
+            your account —{" "}
             <a
               href={MICROSOFT_CONSENT_URL}
               target="_blank"
@@ -303,8 +305,8 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
         <CardHeader>
           <CardTitle>Connect a mailbox</CardTitle>
           <CardDescription>
-            Gmail asks for read/modify and send access, and keeps working offline so
-            sync can run while you are away. Outlook is not available yet.
+            Gmail asks for read/modify and send access, and keeps working offline so sync
+            can run while you are away. Outlook is not available yet.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">

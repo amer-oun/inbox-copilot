@@ -40,4 +40,3 @@ export function mailProviderFor(
       throw new InternalError("Outlook sync is not implemented until phase 8");
   }
 }
-

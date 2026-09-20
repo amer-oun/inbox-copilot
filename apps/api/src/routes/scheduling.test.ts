@@ -20,7 +20,9 @@ const keypair = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
 const privateKey = createPrivateKey(keypair.privateKey);
-process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString("base64");
+process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString(
+  "base64",
+);
 
 const scheduleReply = vi.hoisted(() => vi.fn());
 const scheduleNewMessage = vi.hoisted(() => vi.fn());
@@ -54,7 +56,10 @@ vi.mock("../services/ai/style.js", () => ({
   getWritingStyle: vi.fn(),
 }));
 vi.mock("../services/threads.js", () => ({ listThreads: vi.fn(), getThread: vi.fn() }));
-vi.mock("../services/sync.js", () => ({ startBackfill: vi.fn(), getSyncStatus: vi.fn() }));
+vi.mock("../services/sync.js", () => ({
+  startBackfill: vi.fn(),
+  getSyncStatus: vi.fn(),
+}));
 vi.mock("../services/mailAccounts.js", () => ({
   listMailAccounts: vi.fn(),
   startMailAccountConnect: vi.fn(),
@@ -130,7 +135,9 @@ beforeEach(() => {
   scheduleReply.mockReset().mockResolvedValue(SCHEDULED);
   scheduleNewMessage.mockReset().mockResolvedValue({ ...SCHEDULED, threadId: null });
   listScheduledEmails.mockReset().mockResolvedValue([SCHEDULED]);
-  cancelScheduledEmail.mockReset().mockResolvedValue({ ...SCHEDULED, status: "CANCELLED" });
+  cancelScheduledEmail
+    .mockReset()
+    .mockResolvedValue({ ...SCHEDULED, status: "CANCELLED" });
   listDueReminders.mockReset().mockResolvedValue([REMINDER]);
   dismissReminder.mockReset().mockResolvedValue({ ...REMINDER, status: "DISMISSED" });
   snoozeReminder.mockReset().mockResolvedValue({ ...REMINDER, status: "SNOOZED" });
@@ -402,7 +409,10 @@ describe("follow-up actions", () => {
       .set("authorization", `Bearer ${await internalToken()}`);
 
     expect(response.status).toBe(200);
-    expect(dismissReminder).toHaveBeenCalledWith({ userId: USER_ID, reminderId: REMINDER_ID });
+    expect(dismissReminder).toHaveBeenCalledWith({
+      userId: USER_ID,
+      reminderId: REMINDER_ID,
+    });
   });
 
   it("snoozes for a default of three days when no body is sent", async () => {

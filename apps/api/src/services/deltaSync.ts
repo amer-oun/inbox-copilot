@@ -301,7 +301,10 @@ export async function runDelta(
        * cursor is cleared and a full backfill is queued, because a mailbox that cannot
        * catch up must not be left quietly frozen (§4's safety rail).
        */
-      log.warn({ cursor: mailbox.syncCursor }, "sync cursor expired; falling back to a backfill");
+      log.warn(
+        { cursor: mailbox.syncCursor },
+        "sync cursor expired; falling back to a backfill",
+      );
 
       await db.mailAccount.update({
         where: { id: mailAccountId },

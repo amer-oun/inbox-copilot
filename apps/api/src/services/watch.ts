@@ -108,12 +108,22 @@ export async function ensureWatchForMailbox(
     );
   }
   if (row.provider !== "GMAIL") {
-    return { mailAccountId: row.id, started: false, expiresAt: null, skipped: "not-gmail" };
+    return {
+      mailAccountId: row.id,
+      started: false,
+      expiresAt: null,
+      skipped: "not-gmail",
+    };
   }
   if (row.syncStatus === "REVOKED") {
     // Watching a mailbox we can no longer read would fail on every renewal and log an
     // error an hour, for a grant only the user can restore.
-    return { mailAccountId: row.id, started: false, expiresAt: null, skipped: "inactive" };
+    return {
+      mailAccountId: row.id,
+      started: false,
+      expiresAt: null,
+      skipped: "inactive",
+    };
   }
 
   if (
@@ -201,7 +211,10 @@ export async function stopWatchForMailbox(
       }).stopWatch();
       stopped = true;
     } catch (error) {
-      log.warn({ err: error }, "could not stop the gmail watch; it will expire on its own");
+      log.warn(
+        { err: error },
+        "could not stop the gmail watch; it will expire on its own",
+      );
     }
   }
 
@@ -280,7 +293,8 @@ export async function runWatchKeeper(
      * live again — and a mailbox whose watch had lapsed has missed notifications that
      * only a delta will recover.
      */
-    const watchWasLive = row.watchExpiresAt !== null && row.watchExpiresAt.getTime() > now;
+    const watchWasLive =
+      row.watchExpiresAt !== null && row.watchExpiresAt.getTime() > now;
 
     try {
       const outcome = await ensureWatchForMailbox(row, input.force === true);

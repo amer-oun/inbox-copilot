@@ -158,7 +158,11 @@ function encodeDisplayName(name: string): string {
  * Collapsing it is exactly as safe — the value can no longer end the header.
  */
 export function foldSubject(subject: string): string {
-  const single = subject.replace(/[\r\n]+/g, " ").split(NUL).join("").trim();
+  const single = subject
+    .replace(/[\r\n]+/g, " ")
+    .split(NUL)
+    .join("")
+    .trim();
   return isAscii(single) ? single : encodeWord(single);
 }
 

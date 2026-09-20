@@ -20,7 +20,9 @@ import type {
  */
 
 /** Header lookup is case-insensitive per RFC 5322, and Gmail's casing varies. */
-function headerMap(headers: gmail_v1.Schema$MessagePartHeader[] | undefined): Map<string, string> {
+function headerMap(
+  headers: gmail_v1.Schema$MessagePartHeader[] | undefined,
+): Map<string, string> {
   const map = new Map<string, string>();
   for (const header of headers ?? []) {
     if (!header.name || header.value == null) continue;
@@ -76,14 +78,20 @@ export function parseAddress(value: string | undefined): RawAddress | null {
 
   const angled = /^(.*)<([^>]+)>\s*$/.exec(trimmed);
   if (angled) {
-    const rawName = (angled[1] ?? "").trim().replace(/^"(.*)"$/, "$1").trim();
+    const rawName = (angled[1] ?? "")
+      .trim()
+      .replace(/^"(.*)"$/, "$1")
+      .trim();
     const email = (angled[2] ?? "").trim().toLowerCase();
     if (email.length === 0) return null;
     return rawName.length > 0 ? { name: rawName, email } : { email };
   }
 
   // Bare address, possibly wrapped in quotes or followed by a (comment).
-  const bare = trimmed.replace(/\(.*\)/g, "").replace(/^"(.*)"$/, "$1").trim();
+  const bare = trimmed
+    .replace(/\(.*\)/g, "")
+    .replace(/^"(.*)"$/, "$1")
+    .trim();
   return bare.length > 0 ? { email: bare.toLowerCase() } : null;
 }
 
@@ -97,7 +105,10 @@ const VERDICTS: readonly AuthVerdict[] = [
   "permerror",
 ];
 
-function verdictFor(header: string, method: "spf" | "dkim" | "dmarc"): AuthVerdict | null {
+function verdictFor(
+  header: string,
+  method: "spf" | "dkim" | "dmarc",
+): AuthVerdict | null {
   // e.g. "mx.google.com; spf=pass (google.com: domain of ...) smtp.mailfrom=a@b;
   //       dkim=pass header.i=@b; dmarc=pass (p=REJECT sp=REJECT dis=NONE)"
   const match = new RegExp(`\\b${method}\\s*=\\s*([a-z]+)`, "i").exec(header);
@@ -183,8 +194,7 @@ export function walkParts(payload: gmail_v1.Schema$MessagePart | undefined): Wal
     // An attachment is anything with a filename, or any part Gmail stored
     // separately (attachmentId) that is not the body we are looking for.
     const isAttachment =
-      filename.length > 0 ||
-      (attachmentId !== null && !mimeType.startsWith("text/"));
+      filename.length > 0 || (attachmentId !== null && !mimeType.startsWith("text/"));
 
     if (isAttachment) {
       result.attachments.push({
@@ -194,9 +204,10 @@ export function walkParts(payload: gmail_v1.Schema$MessagePart | undefined): Wal
         sizeBytes: body?.size ?? 0,
         // `inline` disposition, or a cid: reference target — a signature image
         // is not something to show the user as an attachment.
-        isInline: disposition.includes("inline") || part.headers?.some(
-          (header) => header.name?.toLowerCase() === "content-id",
-        ) === true,
+        isInline:
+          disposition.includes("inline") ||
+          part.headers?.some((header) => header.name?.toLowerCase() === "content-id") ===
+            true,
       });
       // An inline part can still be a container (multipart/related); keep walking.
     } else if (mimeType === "text/plain" && result.text === null && body?.data) {
@@ -294,8 +305,7 @@ export function mapMessage(
   // Fall back to text extracted from the HTML part: a plain-text body is what the
   // content hash and every AI prompt are built from, so "no text/plain" cannot
   // mean "no text".
-  const bodyText =
-    walked.text ?? (walked.html === null ? null : htmlToText(walked.html));
+  const bodyText = walked.text ?? (walked.html === null ? null : htmlToText(walked.html));
 
   const mailbox = context.mailboxAddress.toLowerCase();
 
@@ -352,7 +362,10 @@ export function mapThread(
 export function threadParticipants(
   messages: readonly RawMessage[],
 ): { name: string | null; email: string; role: "from" | "to" | "cc" }[] {
-  const seen = new Map<string, { name: string | null; email: string; role: "from" | "to" | "cc" }>();
+  const seen = new Map<
+    string,
+    { name: string | null; email: string; role: "from" | "to" | "cc" }
+  >();
 
   const add = (address: RawAddress, role: "from" | "to" | "cc"): void => {
     const existing = seen.get(address.email);

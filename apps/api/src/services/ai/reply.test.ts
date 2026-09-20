@@ -80,16 +80,18 @@ beforeEach(() => {
     messages: [msg()],
   });
   let sequence = 0;
-  draftCreate.mockReset().mockImplementation(({ data }: { data: Record<string, unknown> }) => {
-    sequence += 1;
-    return Promise.resolve({
-      id: `c${String(sequence).repeat(24).slice(0, 24)}`,
-      tone: data["tone"],
-      body: data["body"],
-      model: data["model"],
-      createdAt: new Date("2026-09-13T10:00:00Z"),
+  draftCreate
+    .mockReset()
+    .mockImplementation(({ data }: { data: Record<string, unknown> }) => {
+      sequence += 1;
+      return Promise.resolve({
+        id: `c${String(sequence).repeat(24).slice(0, 24)}`,
+        tone: data["tone"],
+        body: data["body"],
+        model: data["model"],
+        createdAt: new Date("2026-09-13T10:00:00Z"),
+      });
     });
-  });
   styleFindFirst.mockReset().mockResolvedValue(null);
   usageCreate.mockReset().mockResolvedValue({});
   usageCount.mockReset().mockResolvedValue(0);
@@ -342,9 +344,9 @@ describe("a thread that tries to make the assistant mail a third party", () => {
     );
     // The import list, not the prose: the file's own comment names `services/send.ts`
     // as the thing it is *not*, and a naive search for the word matches that.
-    const imported = [...moduleSource.matchAll(/^import\s[\s\S]*?from\s+"([^"]+)";$/gm)].map(
-      (match) => match[1],
-    );
+    const imported = [
+      ...moduleSource.matchAll(/^import\s[\s\S]*?from\s+"([^"]+)";$/gm),
+    ].map((match) => match[1]);
     expect(imported).not.toContain("../send.js");
     expect(imported.filter((path) => /send|provider/i.test(path ?? ""))).toEqual([]);
   });
@@ -353,7 +355,12 @@ describe("a thread that tries to make the assistant mail a third party", () => {
     await generateReplies({ userId: USER_ID, threadId: THREAD_ID });
 
     for (const call of draftCreate.mock.calls) {
-      expect(Object.keys(call[0].data).sort()).toEqual(["body", "model", "threadId", "tone"]);
+      expect(Object.keys(call[0].data).sort()).toEqual([
+        "body",
+        "model",
+        "threadId",
+        "tone",
+      ]);
       expect(call[0].data).not.toHaveProperty("wasUsed");
     }
   });

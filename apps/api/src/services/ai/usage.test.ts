@@ -49,22 +49,26 @@ beforeEach(() => {
 describe("costUsd", () => {
   it("prices a Haiku classification", () => {
     // 1240 in at $1/MTok + 92 out at $5/MTok.
-    expect(costUsd(MODELS.fast, {
-      inputTokens: 1_240,
-      outputTokens: 92,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-    })).toBe("0.001700");
+    expect(
+      costUsd(MODELS.fast, {
+        inputTokens: 1_240,
+        outputTokens: 92,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    ).toBe("0.001700");
   });
 
   it("prices a Sonnet summary", () => {
     // 4310 in at $3/MTok + 288 out at $15/MTok = 0.01293 + 0.00432.
-    expect(costUsd(MODELS.standard, {
-      inputTokens: 4_310,
-      outputTokens: 288,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-    })).toBe("0.017250");
+    expect(
+      costUsd(MODELS.standard, {
+        inputTokens: 4_310,
+        outputTokens: 288,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    ).toBe("0.017250");
   });
 
   it("charges cached reads at a tenth of the input rate", () => {
@@ -98,12 +102,14 @@ describe("costUsd", () => {
   });
 
   it("records zero for an unpriced model rather than losing the row", () => {
-    expect(costUsd("claude-something-unreleased", {
-      inputTokens: 1_000,
-      outputTokens: 1_000,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-    })).toBe("0.000000");
+    expect(
+      costUsd("claude-something-unreleased", {
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    ).toBe("0.000000");
   });
 
   it("prices every configured model", () => {

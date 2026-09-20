@@ -92,7 +92,9 @@ export async function summarizeThread(input: SummarizeInput): Promise<SummarizeR
     return { summary: null, fromCache: false, skipped: "below-threshold" };
   }
 
-  const contentHash = threadContentHash(input.messages.map((message) => message.contentHash));
+  const contentHash = threadContentHash(
+    input.messages.map((message) => message.contentHash),
+  );
 
   const hit = input.ignoreCache
     ? null
@@ -186,7 +188,9 @@ async function summarizeUncached(
     toolName: TOOL_NAME,
     toolDescription: TOOL_DESCRIPTION,
     schema: aiSummarySchema,
-    userContent: untrustedThreadBlock(threadForPrompt(input.messages, input.mailboxAddress)),
+    userContent: untrustedThreadBlock(
+      threadForPrompt(input.messages, input.mailboxAddress),
+    ),
     ...(input.settings ? { settings: input.settings } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
     logContext: { threadId: input.threadId, messages: input.messages.length },

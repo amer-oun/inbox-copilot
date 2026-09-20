@@ -5,10 +5,7 @@
     {
       "id": "18f0aaaaaaaaaaa2",
       "threadId": "18f0aaaaaaaaaaa1",
-      "labelIds": [
-        "INBOX",
-        "UNREAD"
-      ],
+      "labelIds": ["INBOX", "UNREAD"],
       "snippet": "Your account will be suspended",
       "internalDate": "1741176000000",
       "payload": {

@@ -32,7 +32,10 @@ const settingsFindFirst = vi.hoisted(() => vi.fn());
 
 vi.mock("@inbox-copilot/db", () => ({
   dbForUser: () => ({
-    aiClassification: { findFirst: classificationFindFirst, upsert: classificationUpsert },
+    aiClassification: {
+      findFirst: classificationFindFirst,
+      upsert: classificationUpsert,
+    },
     aiUsage: { create: usageCreate, count: usageCount },
     userSettings: { findFirst: settingsFindFirst },
   }),
@@ -41,9 +44,8 @@ vi.mock("@inbox-copilot/db", () => ({
 
 const { classifyMessage, bandFor, reconcilePriority } = await import("./classify.js");
 const { resetAnthropicClient } = await import("./client.js");
-const { CLASSIFY_SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } = await import(
-  "./prompts.js"
-);
+const { CLASSIFY_SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } =
+  await import("./prompts.js");
 
 const USER_ID = "user_1";
 const MAIL_ACCOUNT_ID = "mail_1";

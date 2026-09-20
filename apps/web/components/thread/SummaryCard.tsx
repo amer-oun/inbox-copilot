@@ -36,7 +36,10 @@ export function SummaryCard({ summary }: { summary: ThreadSummaryDto }) {
         <ul className="mt-3 space-y-1.5">
           {summary.keyPoints.map((point) => (
             <li key={point} className="flex gap-2 text-sm text-muted">
-              <span aria-hidden="true" className="mt-[0.45rem] size-1 shrink-0 rounded-full bg-muted" />
+              <span
+                aria-hidden="true"
+                className="mt-[0.45rem] size-1 shrink-0 rounded-full bg-muted"
+              />
               <span>{point}</span>
             </li>
           ))}

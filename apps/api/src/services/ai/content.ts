@@ -66,7 +66,10 @@ export interface MessageForPrompt {
 }
 
 /** Truncates with a visible marker, so the model knows the text is cut off. */
-export function truncateForPrompt(text: string, maxChars: number = MAX_BODY_CHARS): string {
+export function truncateForPrompt(
+  text: string,
+  maxChars: number = MAX_BODY_CHARS,
+): string {
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n[... truncated, ${text.length - maxChars} more characters]`;
 }
@@ -136,7 +139,8 @@ export function messageForPrompt(
 export function needsSummary(messages: readonly MessageForPrompt[]): boolean {
   if (messages.length >= SUMMARY_MIN_MESSAGES) return true;
   return messages.some(
-    (message) => (message.bodyText ?? message.snippet ?? "").length > SUMMARY_MIN_BODY_CHARS,
+    (message) =>
+      (message.bodyText ?? message.snippet ?? "").length > SUMMARY_MIN_BODY_CHARS,
   );
 }
 

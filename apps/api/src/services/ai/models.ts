@@ -63,11 +63,12 @@ export type ModelId = (typeof MODELS)[ModelTier] | (typeof GEMINI_MODELS)[ModelT
 /** Which provider a transport talks to. */
 export type AiProviderName = "anthropic" | "gemini";
 
-const PROVIDER_MODELS: Readonly<Record<AiProviderName, Readonly<Record<ModelTier, ModelId>>>> =
-  {
-    anthropic: MODELS,
-    gemini: GEMINI_MODELS,
-  };
+const PROVIDER_MODELS: Readonly<
+  Record<AiProviderName, Readonly<Record<ModelTier, ModelId>>>
+> = {
+  anthropic: MODELS,
+  gemini: GEMINI_MODELS,
+};
 
 /**
  * Which tier each feature runs on. `feature` is also the value written to

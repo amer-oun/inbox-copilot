@@ -6,10 +6,12 @@ import { z } from "zod";
  * bundled into the browser.
  */
 
-const base64Pem = z.string().refine(
-  (value) => Buffer.from(value, "base64").toString("utf8").includes("-----BEGIN"),
-  { message: "must be a base64-encoded PEM block" },
-);
+const base64Pem = z
+  .string()
+  .refine(
+    (value) => Buffer.from(value, "base64").toString("utf8").includes("-----BEGIN"),
+    { message: "must be a base64-encoded PEM block" },
+  );
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),

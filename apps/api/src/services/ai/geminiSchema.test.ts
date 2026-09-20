@@ -227,10 +227,9 @@ describe("what is dropped, and why that is safe", () => {
   it("drops $schema and additionalProperties", () => {
     // Gemini rejects a declaration carrying keys outside its subset, so these cannot
     // simply be passed through.
-    const converted = toGeminiSchema(compile(aiClassificationSchema)) as unknown as Record<
-      string,
-      unknown
-    >;
+    const converted = toGeminiSchema(
+      compile(aiClassificationSchema),
+    ) as unknown as Record<string, unknown>;
 
     expect(converted["$schema"]).toBeUndefined();
     expect(converted["additionalProperties"]).toBeUndefined();

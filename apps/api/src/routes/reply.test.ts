@@ -17,7 +17,9 @@ const keypair = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
 const privateKey = createPrivateKey(keypair.privateKey);
-process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString("base64");
+process.env["INTERNAL_JWT_PUBLIC_KEY"] = Buffer.from(keypair.publicKey).toString(
+  "base64",
+);
 
 const generateReplies = vi.hoisted(() => vi.fn());
 const composeMessage = vi.hoisted(() => vi.fn());
@@ -30,7 +32,10 @@ vi.mock("../services/ai/compose.js", () => ({ composeMessage }));
 vi.mock("../services/send.js", () => ({ sendReply }));
 vi.mock("../services/ai/style.js", () => ({ buildWritingStyle, getWritingStyle }));
 vi.mock("../services/threads.js", () => ({ listThreads: vi.fn(), getThread: vi.fn() }));
-vi.mock("../services/sync.js", () => ({ startBackfill: vi.fn(), getSyncStatus: vi.fn() }));
+vi.mock("../services/sync.js", () => ({
+  startBackfill: vi.fn(),
+  getSyncStatus: vi.fn(),
+}));
 vi.mock("../services/mailAccounts.js", () => ({
   listMailAccounts: vi.fn(),
   startMailAccountConnect: vi.fn(),
@@ -123,7 +128,10 @@ describe("POST /threads/:id/replies", () => {
       .set("authorization", `Bearer ${await internalToken()}`)
       .send({});
 
-    expect(generateReplies).toHaveBeenCalledWith({ userId: USER_ID, threadId: THREAD_ID });
+    expect(generateReplies).toHaveBeenCalledWith({
+      userId: USER_ID,
+      threadId: THREAD_ID,
+    });
   });
 
   it("rejects a tone that is not in the enum", async () => {
@@ -147,7 +155,9 @@ describe("POST /threads/:id/replies", () => {
   });
 
   it("needs an internal token", async () => {
-    const response = await request(createApp()).post(`/threads/${THREAD_ID}/replies`).send({});
+    const response = await request(createApp())
+      .post(`/threads/${THREAD_ID}/replies`)
+      .send({});
 
     expect(response.status).toBe(401);
     expect(generateReplies).not.toHaveBeenCalled();
@@ -308,9 +318,9 @@ describe("the routes that do not exist", () => {
       `/threads/${THREAD_ID}/send`,
       "/send",
     ]) {
-      expect((await request(app).post(path).set("authorization", `Bearer ${token}`)).status).toBe(
-        404,
-      );
+      expect(
+        (await request(app).post(path).set("authorization", `Bearer ${token}`)).status,
+      ).toBe(404);
     }
   });
 

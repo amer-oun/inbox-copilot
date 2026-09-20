@@ -49,7 +49,10 @@ try {
   if (error instanceof AiStubPortInUseError) {
     // Another stub already has the port, which is the outcome we wanted anyway.
     // Exiting 0 keeps `pnpm dev` alive: the api and worker do not care who answers.
-    logger.info({ port: error.port }, "ai stub already running on this port; not starting a second");
+    logger.info(
+      { port: error.port },
+      "ai stub already running on this port; not starting a second",
+    );
     process.exit(0);
   }
   throw error;

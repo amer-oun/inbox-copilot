@@ -128,7 +128,9 @@ beforeEach(() => {
     scopes: [],
     expiresAt: new Date("2026-09-15T03:00:00Z"),
   });
-  fetchIdentity.mockReset().mockResolvedValue({ emailAddress: EMAIL, displayName: "Person" });
+  fetchIdentity
+    .mockReset()
+    .mockResolvedValue({ emailAddress: EMAIL, displayName: "Person" });
 });
 
 describe("a newly connected mailbox", () => {
@@ -198,10 +200,12 @@ describe("two consent screens finishing at once", () => {
     mailAccountFindFirst.mockResolvedValue(null);
     const conflict = await import("@inbox-copilot/db").then(
       (db) =>
-        new (db.Prisma.PrismaClientKnownRequestError as unknown as new (
-          message: string,
-          code: string,
-        ) => Error)("unique violation", "P2002"),
+        new (
+          db.Prisma.PrismaClientKnownRequestError as unknown as new (
+            message: string,
+            code: string,
+          ) => Error
+        )("unique violation", "P2002"),
     );
     mailAccountCreate.mockRejectedValue(conflict);
 

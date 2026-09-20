@@ -57,7 +57,9 @@ function apiError(options: {
       ...(options.status === undefined ? {} : { status: options.status }),
       ...(options.retryAfter === undefined
         ? {}
-        : { headers: buildHeaders(options.headerStyle ?? "headers", options.retryAfter) }),
+        : {
+            headers: buildHeaders(options.headerStyle ?? "headers", options.retryAfter),
+          }),
       ...(options.reason === undefined
         ? {}
         : { data: { error: { errors: [{ reason: options.reason }] } } }),
@@ -74,8 +76,12 @@ describe("isRetryable", () => {
   });
 
   it("retries Gmail's rateLimitExceeded, which arrives as a 403", () => {
-    expect(isRetryable(apiError({ status: 403, reason: "rateLimitExceeded" }))).toBe(true);
-    expect(isRetryable(apiError({ status: 403, reason: "userRateLimitExceeded" }))).toBe(true);
+    expect(isRetryable(apiError({ status: 403, reason: "rateLimitExceeded" }))).toBe(
+      true,
+    );
+    expect(isRetryable(apiError({ status: 403, reason: "userRateLimitExceeded" }))).toBe(
+      true,
+    );
   });
 
   it("retries 5xx and socket faults", () => {
@@ -85,7 +91,9 @@ describe("isRetryable", () => {
 
   it("does not retry a 403 that is about scope, not rate", () => {
     // Retrying a missing-scope error just delays the real failure.
-    expect(isRetryable(apiError({ status: 403, reason: "insufficientPermissions" }))).toBe(false);
+    expect(
+      isRetryable(apiError({ status: 403, reason: "insufficientPermissions" })),
+    ).toBe(false);
   });
 
   it("does not retry 400, 401 or 404", () => {
@@ -97,7 +105,9 @@ describe("isRetryable", () => {
 
 describe("reasonOf", () => {
   it("reads the reason out of a nested Google error body", () => {
-    expect(reasonOf(apiError({ status: 403, reason: "quotaExceeded" }))).toBe("quotaExceeded");
+    expect(reasonOf(apiError({ status: 403, reason: "quotaExceeded" }))).toBe(
+      "quotaExceeded",
+    );
   });
 
   it("returns undefined when there is no reason", () => {
@@ -136,13 +146,17 @@ describe("retryAfterMs", () => {
 
   it("is case-insensitive on a plain record", () => {
     expect(
-      retryAfterMs(apiError({ status: 429, retryAfter: "12", headerStyle: "mixedCaseRecord" })),
+      retryAfterMs(
+        apiError({ status: 429, retryAfter: "12", headerStyle: "mixedCaseRecord" }),
+      ),
     ).toBe(12_000);
   });
 
   it("takes the first value when a record repeats the header", () => {
     expect(
-      retryAfterMs(apiError({ status: 429, retryAfter: "8", headerStyle: "arrayRecord" })),
+      retryAfterMs(
+        apiError({ status: 429, retryAfter: "8", headerStyle: "arrayRecord" }),
+      ),
     ).toBe(8_000);
   });
 
@@ -376,7 +390,9 @@ describe("withRetry", () => {
 
     await expect(
       withRetry(fn, { label: "test", attempts: 2, sleep: noSleep }),
-    ).rejects.toSatisfy((thrown: unknown) => !JSON.stringify(thrown).includes("quota-token-abc"));
+    ).rejects.toSatisfy(
+      (thrown: unknown) => !JSON.stringify(thrown).includes("quota-token-abc"),
+    );
   });
 });
 
@@ -385,13 +401,17 @@ describe("mapWithConcurrency", () => {
     let inFlight = 0;
     let peak = 0;
 
-    await mapWithConcurrency(Array.from({ length: 20 }, (_, i) => i), 5, async (item) => {
-      inFlight++;
-      peak = Math.max(peak, inFlight);
-      await new Promise((resolve) => setTimeout(resolve, 1));
-      inFlight--;
-      return item;
-    });
+    await mapWithConcurrency(
+      Array.from({ length: 20 }, (_, i) => i),
+      5,
+      async (item) => {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        inFlight--;
+        return item;
+      },
+    );
 
     expect(peak).toBeLessThanOrEqual(5);
     expect(peak).toBeGreaterThan(1);

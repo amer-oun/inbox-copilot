@@ -26,10 +26,7 @@ export function CardTitle({ className, ...props }: React.ComponentProps<"h2">) {
   );
 }
 
-export function CardDescription({
-  className,
-  ...props
-}: React.ComponentProps<"p">) {
+export function CardDescription({ className, ...props }: React.ComponentProps<"p">) {
   return <p className={cn("text-sm text-muted", className)} {...props} />;
 }
 

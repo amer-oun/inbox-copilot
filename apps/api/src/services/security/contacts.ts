@@ -149,7 +149,10 @@ export async function knownDomainsFor(userId: string): Promise<ReadonlySet<strin
   try {
     const domains = foldDomains(await queryDomains(userId));
     cache.set(userId, { domains, expiresAt: Date.now() + KNOWN_DOMAINS_TTL_MS });
-    logger.debug({ userId, knownDomains: domains.size }, "known correspondent domains built");
+    logger.debug(
+      { userId, knownDomains: domains.size },
+      "known correspondent domains built",
+    );
     return domains;
   } catch (error) {
     logger.error({ err: error, userId }, "could not derive known correspondent domains");

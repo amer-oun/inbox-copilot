@@ -82,7 +82,10 @@ describe("pricing", () => {
      */
     for (const feature of FEATURES) {
       for (const provider of ["anthropic", "gemini"] as const) {
-        expect(PRICING[modelFor(feature, provider)], `${provider}/${feature}`).toBeDefined();
+        expect(
+          PRICING[modelFor(feature, provider)],
+          `${provider}/${feature}`,
+        ).toBeDefined();
       }
     }
   });
@@ -119,12 +122,14 @@ describe("pricing", () => {
      * something not in this table is a config gap. What must not happen is a Gemini id
      * being absent from PRICING, which the first test in this block covers.
      */
-    expect(costUsd("some-model-nobody-priced", {
-      inputTokens: 1_000,
-      outputTokens: 1_000,
-      cacheReadTokens: 0,
-      cacheWriteTokens: 0,
-    })).toBe("0.000000");
+    expect(
+      costUsd("some-model-nobody-priced", {
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    ).toBe("0.000000");
     expect(PRICING["some-model-nobody-priced" as keyof typeof PRICING]).toBeUndefined();
   });
 });

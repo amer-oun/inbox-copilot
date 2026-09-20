@@ -74,6 +74,9 @@ export async function syncMailAccountAction(formData: FormData): Promise<void> {
   );
 
   revalidatePath("/settings/accounts");
-  redirect(result.enqueued ? "/settings/accounts?sync=queued" : "/settings/accounts?sync=running");
+  redirect(
+    result.enqueued
+      ? "/settings/accounts?sync=queued"
+      : "/settings/accounts?sync=running",
+  );
 }
-

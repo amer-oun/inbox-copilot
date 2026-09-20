@@ -203,7 +203,10 @@ async function processSweep(job: Job<AiSweepJob>): Promise<void> {
 
   const queued = results.reduce((sum, result) => sum + result.queued, 0);
   if (queued > 0) {
-    logger.info({ jobId: job.id, queued, users: results.length }, "sweep queued enrichment");
+    logger.info(
+      { jobId: job.id, queued, users: results.length },
+      "sweep queued enrichment",
+    );
   }
 }
 
@@ -282,9 +285,7 @@ async function processDelta(job: Job<DeltaJob>): Promise<void> {
  */
 async function processWatch(job: Job<WatchJob>): Promise<void> {
   const payload = watchJobSchema.parse(job.data);
-  const result = await runWatchKeeper(
-    payload.force === true ? { force: true } : {},
-  );
+  const result = await runWatchKeeper(payload.force === true ? { force: true } : {});
 
   if (result.renewed > 0 || result.caughtUp > 0 || result.failed > 0) {
     logger.info({ jobId: job.id, ...result }, "watch keeper queued work");
@@ -383,7 +384,12 @@ const deltaWorker = new Worker<DeltaJob>(QUEUE_NAMES.syncDelta, processDelta, {
 deltaWorker.on("failed", (job, error) => {
   abortJob(`delta-${job?.id}`, "job failed");
   logger.error(
-    { queue: QUEUE_NAMES.syncDelta, jobId: job?.id, attempts: job?.attemptsMade, err: error },
+    {
+      queue: QUEUE_NAMES.syncDelta,
+      jobId: job?.id,
+      attempts: job?.attemptsMade,
+      err: error,
+    },
     "delta job failed",
   );
 });
@@ -502,7 +508,10 @@ styleWorker.on("error", (error) => {
 });
 
 sweepWorker.on("failed", (job, error) => {
-  logger.error({ queue: QUEUE_NAMES.aiSweep, jobId: job?.id, err: error }, "sweep failed");
+  logger.error(
+    { queue: QUEUE_NAMES.aiSweep, jobId: job?.id, err: error },
+    "sweep failed",
+  );
 });
 
 sweepWorker.on("error", (error) => {

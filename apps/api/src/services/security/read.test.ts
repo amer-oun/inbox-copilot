@@ -31,7 +31,9 @@ describe("threatAssessmentFor", () => {
     // Not an empty "all clear": a banner that says nothing was checked would be worse
     // than no banner, and the UI needs to be able to tell the two apart.
     expect(threatAssessmentFor([])).toBeNull();
-    expect(threatAssessmentFor([{ id: "m1", classification: null, threatAppeal: null }])).toBeNull();
+    expect(
+      threatAssessmentFor([{ id: "m1", classification: null, threatAppeal: null }]),
+    ).toBeNull();
     expect(threatAssessmentFor([row("m1", { threatLevel: "UNKNOWN" })])).toBeNull();
   });
 
@@ -78,7 +80,9 @@ describe("threatAssessmentFor", () => {
      * entitled to see — a verdict the model raised — by presenting it as something the
      * deterministic checks found.
      */
-    const assessment = threatAssessmentFor([row("m1", { ruleSignals: "not json we wrote" })]);
+    const assessment = threatAssessmentFor([
+      row("m1", { ruleSignals: "not json we wrote" }),
+    ]);
 
     expect(assessment?.ruleScore).toBe(0);
     expect(assessment?.ruleFloor).toBe("SAFE");
@@ -87,14 +91,18 @@ describe("threatAssessmentFor", () => {
 
   it("drops a stored intent it does not recognize", () => {
     // The column is a plain string, so a value from an older enum must not reach the DTO.
-    expect(threatAssessmentFor([row("m1", { threatIntent: "SOMETHING_ELSE" })])?.intent).toBeNull();
+    expect(
+      threatAssessmentFor([row("m1", { threatIntent: "SOMETHING_ELSE" })])?.intent,
+    ).toBeNull();
   });
 
   it("shows no reasons rather than junk when the column is not a string array", () => {
-    expect(threatAssessmentFor([row("m1", { threatReasons: { a: 1 } })])?.reasons).toEqual([]);
-    expect(threatAssessmentFor([row("m1", { threatReasons: [1, "", "real"] })])?.reasons).toEqual([
-      "real",
-    ]);
+    expect(
+      threatAssessmentFor([row("m1", { threatReasons: { a: 1 } })])?.reasons,
+    ).toEqual([]);
+    expect(
+      threatAssessmentFor([row("m1", { threatReasons: [1, "", "real"] })])?.reasons,
+    ).toEqual(["real"]);
   });
 
   it("reports an appeal alongside the verdict it disagrees with", () => {

@@ -45,7 +45,8 @@ const LEVEL_COPY: Readonly<Record<ThreatLevel, { title: string; blurb: string }>
   },
   SPAM: {
     title: "This looks like unsolicited bulk mail",
-    blurb: "Nothing here is aimed at you personally. Links in bulk mail are best left alone.",
+    blurb:
+      "Nothing here is aimed at you personally. Links in bulk mail are best left alone.",
   },
   SAFE: { title: "Checks passed", blurb: "" },
   UNKNOWN: { title: "Not assessed", blurb: "" },
@@ -98,7 +99,8 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
   const [appealed, setAppealed] = useState(threat.appeal !== null);
 
   const appeal = useMutation({
-    mutationFn: async () => threatAppealResponseSchema.parse(await postAppeal(threat.messageId)),
+    mutationFn: async () =>
+      threatAppealResponseSchema.parse(await postAppeal(threat.messageId)),
     onSuccess: () => {
       setAppealed(true);
       // The verdict does not change, so this refresh is about the record rather than
@@ -119,7 +121,10 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
     return (
       <section className="rounded-card border border-border-subtle bg-surface px-3 py-2 text-xs text-muted">
         <p className="flex items-start gap-2">
-          <ShieldCheck aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-success" />
+          <ShieldCheck
+            aria-hidden="true"
+            className="mt-0.5 size-3.5 shrink-0 text-success"
+          />
           <span>
             {"Sender checks passed. Worth knowing: "}
             {threat.reasons.join(" ")}
@@ -148,7 +153,10 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
     >
       <div className="flex items-start gap-2">
         {appealed ? (
-          <ShieldQuestion aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted" />
+          <ShieldQuestion
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0 text-muted"
+          />
         ) : (
           <ShieldAlert
             aria-hidden="true"
@@ -163,7 +171,9 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
               appealed ? "text-ink" : tone === "danger" ? "text-danger" : "text-warning"
             }`}
           >
-            {appealed ? `You marked this as safe (we flagged it as ${threat.level.toLowerCase()})` : copy.title}
+            {appealed
+              ? `You marked this as safe (we flagged it as ${threat.level.toLowerCase()})`
+              : copy.title}
           </h2>
 
           {!appealed && <p className="mt-1 text-sm text-ink">{copy.blurb}</p>}

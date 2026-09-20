@@ -24,7 +24,10 @@ const settingsFindFirst = vi.hoisted(() => vi.fn());
 
 vi.mock("@inbox-copilot/db", () => ({
   dbForUser: () => ({
-    aiClassification: { findFirst: classificationFindFirst, upsert: classificationUpsert },
+    aiClassification: {
+      findFirst: classificationFindFirst,
+      upsert: classificationUpsert,
+    },
     aiSummary: { findFirst: summaryFindFirst, upsert: summaryUpsert },
     aiUsage: { count: usageCount, create: usageCreate },
     userSettings: { findFirst: settingsFindFirst },
@@ -109,7 +112,12 @@ beforeEach(() => {
       confidence: 0.9,
     },
     model: "gemini-3.1-flash-lite",
-    tokens: { inputTokens: 100, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    tokens: {
+      inputTokens: 100,
+      outputTokens: 40,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
   });
 });
 
@@ -214,7 +222,9 @@ describe("classification", () => {
       ignoreCache: true,
     });
 
-    expect(classificationUpsert.mock.calls[0]?.[0].create.model).toBe("gemini-3.1-flash-lite");
+    expect(classificationUpsert.mock.calls[0]?.[0].create.model).toBe(
+      "gemini-3.1-flash-lite",
+    );
   });
 });
 
@@ -227,7 +237,12 @@ describe("thread summaries", () => {
       actionItems: [{ text: "Confirm the totals", owner: "user" }],
     },
     model: "gemini-3.5-flash-lite",
-    tokens: { inputTokens: 900, outputTokens: 120, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    tokens: {
+      inputTokens: 900,
+      outputTokens: 120,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    },
   };
 
   function summarize(overrides: Record<string, unknown> = {}) {

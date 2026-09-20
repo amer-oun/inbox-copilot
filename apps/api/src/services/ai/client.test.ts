@@ -36,9 +36,8 @@ vi.mock("@inbox-copilot/db", () => ({
 }));
 
 const { callStructured, resetAnthropicClient } = await import("./client.js");
-const { CLASSIFY_SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } = await import(
-  "./prompts.js"
-);
+const { CLASSIFY_SYSTEM_PROMPT, UNTRUSTED_CLOSE, UNTRUSTED_OPEN } =
+  await import("./prompts.js");
 const { MODELS } = await import("./models.js");
 
 const USER_ID = "user_1";

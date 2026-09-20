@@ -23,7 +23,8 @@ export const TONE_GUIDANCE: Readonly<Record<z.infer<typeof replyToneSchema>, str
   FRIENDLY: "Friendly and personable. Contractions are fine; stay concrete.",
   CONCISE: "As short as it can be while still answering. Two or three sentences.",
   FORMAL: "Formal. Full sentences, no contractions, measured register.",
-  APOLOGETIC: "Apologetic without grovelling. Acknowledge the miss, then move to the fix.",
+  APOLOGETIC:
+    "Apologetic without grovelling. Acknowledge the miss, then move to the fix.",
   ENTHUSIASTIC: "Enthusiastic and energetic. Positive, but never gushing or salesy.",
 };
 

@@ -44,7 +44,9 @@ describe("foldDomains", () => {
      * a stranger must not make the stranger familiar, or a lookalike domain would become
      * "known" the moment it wrote to you.
      */
-    expect([...foldDomains([{ domain: "evil.test", n: 1, outbound: false }])]).toEqual([]);
+    expect([...foldDomains([{ domain: "evil.test", n: 1, outbound: false }])]).toEqual(
+      [],
+    );
   });
 
   it("admits an inbound domain once it has written repeatedly", () => {
@@ -63,9 +65,12 @@ describe("foldDomains", () => {
   });
 
   it("ignores rows it cannot read as a domain", () => {
-    expect([...foldDomains([{ domain: null, n: 4, outbound: true }, { domain: "", n: 4, outbound: true }])]).toEqual(
-      [],
-    );
+    expect([
+      ...foldDomains([
+        { domain: null, n: 4, outbound: true },
+        { domain: "", n: 4, outbound: true },
+      ]),
+    ]).toEqual([]);
   });
 
   it("combines inbound and outbound counts for the same party", () => {

@@ -132,7 +132,11 @@ export async function composeMessage(input: ComposeInput): Promise<ComposeResult
   const settings = input.settings ?? (await loadAiSettings(input.userId));
   const tone = input.tone ?? settings.defaultTone;
 
-  const ids = await findCorrespondenceIds(input.userId, input.to, COMPOSE_CONTEXT_MESSAGES);
+  const ids = await findCorrespondenceIds(
+    input.userId,
+    input.to,
+    COMPOSE_CONTEXT_MESSAGES,
+  );
   const history = await loadCorrespondence(input.userId, ids);
   const style = await loadWritingStyle(input.userId);
 

@@ -80,7 +80,9 @@ export async function recordThreatAppeal(input: {
    * this endpoint's whole value is that its rows mean something.
    */
   if (target.level === "UNKNOWN" || target.level === "SAFE") {
-    throw new BadRequestError("This message is not flagged, so there is nothing to appeal");
+    throw new BadRequestError(
+      "This message is not flagged, so there is nothing to appeal",
+    );
   }
 
   const data = {
@@ -111,10 +113,18 @@ export async function recordThreatAppeal(input: {
           select: { createdAt: true, note: true, claimedLevel: true, claimedScore: true },
         })
       : await (async () => {
-          await db.threatAppeal.updateMany({ where: { messageId: input.messageId }, data });
+          await db.threatAppeal.updateMany({
+            where: { messageId: input.messageId },
+            data,
+          });
           const updated = await db.threatAppeal.findFirst({
             where: { messageId: input.messageId },
-            select: { createdAt: true, note: true, claimedLevel: true, claimedScore: true },
+            select: {
+              createdAt: true,
+              note: true,
+              claimedLevel: true,
+              claimedScore: true,
+            },
           });
           if (updated === null) throw new NotFoundError("Appeal not found");
           return updated;

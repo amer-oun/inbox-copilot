@@ -11,10 +11,7 @@ const globalForPrisma = globalThis as unknown as {
 
 function createClient(): PrismaClient {
   return new PrismaClient({
-    log:
-      process.env["NODE_ENV"] === "production"
-        ? ["warn", "error"]
-        : ["warn", "error"],
+    log: process.env["NODE_ENV"] === "production" ? ["warn", "error"] : ["warn", "error"],
   });
 }
 

@@ -158,11 +158,7 @@ export interface MailProvider {
     input: OutboundMessage,
   ): Promise<{ providerMessageId: string; providerThreadId: string }>;
   createDraft(input: OutboundMessage): Promise<{ draftId: string }>;
-  modifyLabels(
-    providerThreadId: string,
-    add: string[],
-    remove: string[],
-  ): Promise<void>;
+  modifyLabels(providerThreadId: string, add: string[], remove: string[]): Promise<void>;
 
   // push — phase 7
   startWatch(): Promise<{ expiresAt: Date; cursor: string }>;

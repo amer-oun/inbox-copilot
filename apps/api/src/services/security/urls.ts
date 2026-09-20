@@ -123,46 +123,46 @@ export function isPunycodeHost(host: string): boolean {
  */
 const CONFUSABLES: Readonly<Record<string, string>> = {
   // Cyrillic
-  "а": "a", // а
-  "е": "e", // е
-  "о": "o", // о
-  "р": "p", // р
-  "с": "c", // с
-  "у": "y", // у
-  "х": "x", // х
-  "і": "i", // і
-  "ѕ": "s", // ѕ
-  "ј": "j", // ј
-  "һ": "h", // һ
-  "к": "k", // к
-  "м": "m", // м
-  "т": "t", // т
-  "в": "b", // в
+  а: "a", // а
+  е: "e", // е
+  о: "o", // о
+  р: "p", // р
+  с: "c", // с
+  у: "y", // у
+  х: "x", // х
+  і: "i", // і
+  ѕ: "s", // ѕ
+  ј: "j", // ј
+  һ: "h", // һ
+  к: "k", // к
+  м: "m", // м
+  т: "t", // т
+  в: "b", // в
   // Greek
-  "ο": "o", // ο
-  "α": "a", // α
-  "ε": "e", // ε
-  "ρ": "p", // ρ
-  "ν": "v", // ν
-  "κ": "k", // κ
-  "τ": "t", // τ
+  ο: "o", // ο
+  α: "a", // α
+  ε: "e", // ε
+  ρ: "p", // ρ
+  ν: "v", // ν
+  κ: "k", // κ
+  τ: "t", // τ
   // Latin letters with marks that read as the bare letter at a glance
-  "à": "a",
-  "á": "a",
-  "â": "a",
-  "ä": "a",
-  "è": "e",
-  "é": "e",
-  "ê": "e",
-  "ì": "i",
-  "í": "i",
-  "ò": "o",
-  "ó": "o",
-  "ô": "o",
-  "ö": "o",
-  "ù": "u",
-  "ú": "u",
-  "ü": "u",
+  à: "a",
+  á: "a",
+  â: "a",
+  ä: "a",
+  è: "e",
+  é: "e",
+  ê: "e",
+  ì: "i",
+  í: "i",
+  ò: "o",
+  ó: "o",
+  ô: "o",
+  ö: "o",
+  ù: "u",
+  ú: "u",
+  ü: "u",
   // Digits worn as letters
   "0": "o",
   "1": "l",
@@ -275,7 +275,9 @@ export function lookalikeOf(
       return { domain, resembles: candidate, distance: 0, viaHomoglyphs: true };
     }
 
-    const limit = maxLookalikeDistance(Math.max(foldedDomain.length, foldedCandidate.length));
+    const limit = maxLookalikeDistance(
+      Math.max(foldedDomain.length, foldedCandidate.length),
+    );
     const distance = levenshtein(foldedDomain, foldedCandidate, limit);
     if (distance > limit) continue;
 
@@ -408,7 +410,8 @@ export function urlSignals(input: UrlSignalInput): UrlSignals {
     const domain = registrableDomain(host);
     if (domain !== null && !isRawIpHost(host)) {
       const lookalike = lookalikeOf(domain, input.knownDomains);
-      if (lookalike !== null && !lookalikes.has(domain)) lookalikes.set(domain, lookalike);
+      if (lookalike !== null && !lookalikes.has(domain))
+        lookalikes.set(domain, lookalike);
     }
 
     const claimed = claimedHostOf(link.shown);
@@ -422,7 +425,8 @@ export function urlSignals(input: UrlSignalInput): UrlSignals {
      */
     if (claimedDomain !== null && domain !== null && claimedDomain !== domain) {
       const key = `${claimed}>${host}`;
-      if (!mismatches.has(key)) mismatches.set(key, { shownHost: claimed, actualHost: host });
+      if (!mismatches.has(key))
+        mismatches.set(key, { shownHost: claimed, actualHost: host });
     }
   }
 

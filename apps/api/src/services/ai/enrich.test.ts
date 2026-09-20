@@ -45,9 +45,8 @@ vi.mock("../../lib/queues.js", () => ({
 }));
 
 const { runEnrich, enqueueEnrichment } = await import("./enrich.js");
-const { AiCapExceededError, AiDisabledError, NotFoundError } = await import(
-  "../../lib/errors.js"
-);
+const { AiCapExceededError, AiDisabledError, NotFoundError } =
+  await import("../../lib/errors.js");
 
 const USER_ID = "user_1";
 const MAIL_ACCOUNT_ID = "mail_1";
@@ -69,7 +68,13 @@ const ROW = {
   hasAttachments: false,
   contentHash: "hash-1",
   threadId: "thread_1",
-  authResults: { spf: "pass", dkim: "pass", dmarc: "pass", returnPath: null, displayNameMismatch: false },
+  authResults: {
+    spf: "pass",
+    dkim: "pass",
+    dmarc: "pass",
+    returnPath: null,
+    displayNameMismatch: false,
+  },
   attachments: [],
   mailAccount: { emailAddress: "person@example.com" },
 };
@@ -156,7 +161,9 @@ describe("runEnrich", () => {
      */
     await runEnrich(JOB);
 
-    expect(Object.keys(threadUpdate.mock.calls[0]?.[0].data)).not.toContain("threatLevel");
+    expect(Object.keys(threadUpdate.mock.calls[0]?.[0].data)).not.toContain(
+      "threatLevel",
+    );
     expect(refreshThreadThreatLevel).toHaveBeenCalledWith(USER_ID, "thread_1");
   });
 
@@ -182,7 +189,16 @@ describe("runEnrich", () => {
     });
     assessMessageThreat.mockImplementation(async () => {
       order.push("assess");
-      return { level: "SAFE", score: 0, reasons: [], rules: {}, intent: null, rulesOnly: true, fromCache: false, model: null };
+      return {
+        level: "SAFE",
+        score: 0,
+        reasons: [],
+        rules: {},
+        intent: null,
+        rulesOnly: true,
+        fromCache: false,
+        model: null,
+      };
     });
 
     await runEnrich(JOB);
@@ -219,7 +235,9 @@ describe("runEnrich", () => {
     // A cap belongs to the pipeline as a whole and is handled by the existing cap path —
     // it is not something the threat stage should swallow into "failed", where the
     // distinction between "we could not" and "we ran out of budget" would be lost.
-    assessMessageThreat.mockRejectedValue(new AiCapExceededError("cap", { used: 500, cap: 500 }));
+    assessMessageThreat.mockRejectedValue(
+      new AiCapExceededError("cap", { used: 500, cap: 500 }),
+    );
 
     const result = await runEnrich(JOB);
 
@@ -347,7 +365,9 @@ describe("runEnrich settings and limits", () => {
   });
 
   it("keeps the classification when the cap is hit during summarization", async () => {
-    summarizeThread.mockRejectedValue(new AiCapExceededError("Daily AI call cap reached"));
+    summarizeThread.mockRejectedValue(
+      new AiCapExceededError("Daily AI call cap reached"),
+    );
 
     const result = await runEnrich(JOB);
 
@@ -404,7 +424,11 @@ describe("enqueueEnrichment", () => {
 
   it("does not touch the queue for an empty list", async () => {
     expect(
-      await enqueueEnrichment({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID, messageIds: [] }),
+      await enqueueEnrichment({
+        userId: USER_ID,
+        mailAccountId: MAIL_ACCOUNT_ID,
+        messageIds: [],
+      }),
     ).toBe(0);
     expect(addBulk).not.toHaveBeenCalled();
   });
@@ -527,7 +551,11 @@ describe("enqueueEnrichment and the recompute flags", () => {
     });
 
     const jobs = addBulk.mock.calls[0]?.[0] as { data: Record<string, unknown> }[];
-    expect(jobs[0]?.data).toMatchObject({ messageId: "m_newest", ignoreCache: true, resummarize: true });
+    expect(jobs[0]?.data).toMatchObject({
+      messageId: "m_newest",
+      ignoreCache: true,
+      resummarize: true,
+    });
     // Same thread, so it re-classifies but does not pay for a second identical summary.
     expect(jobs[1]?.data).toMatchObject({ messageId: "m_older", ignoreCache: true });
     expect("resummarize" in (jobs[1]?.data ?? {})).toBe(false);
@@ -559,7 +587,12 @@ describe("enqueueEnrichment and the recompute flags", () => {
     const remove = vi.fn();
     getJob.mockResolvedValue({
       getState: async () => "waiting",
-      data: { messageId: "m_1", mailAccountId: MAIL_ACCOUNT_ID, userId: USER_ID, ignoreCache: true },
+      data: {
+        messageId: "m_1",
+        mailAccountId: MAIL_ACCOUNT_ID,
+        userId: USER_ID,
+        ignoreCache: true,
+      },
       remove,
     });
 

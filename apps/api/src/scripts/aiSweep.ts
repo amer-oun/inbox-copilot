@@ -92,7 +92,9 @@ function parseArgs(argv: readonly string[]): Options {
      * one person on purpose. Sweeping every user in the database for gaps is cheap and
      * idempotent; re-running every user's whole mailbox is neither.
      */
-    throw new Error("--force needs --email=someone@example.com: it re-runs a whole mailbox");
+    throw new Error(
+      "--force needs --email=someone@example.com: it re-runs a whole mailbox",
+    );
   }
 
   return options;
@@ -159,7 +161,11 @@ async function main(): Promise<void> {
             `\nRun again with --limit=${result.found + result.remaining} to take the rest.`,
         );
       }
-      if (!options.ignoreCap && result.budget !== undefined && result.budget < result.found) {
+      if (
+        !options.ignoreCap &&
+        result.budget !== undefined &&
+        result.budget < result.found
+      ) {
         // The budget trims the batch before the queue sees it, so this is the difference
         // between "queued 200" and "200 will actually be classified".
         console.log(

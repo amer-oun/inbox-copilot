@@ -74,9 +74,8 @@ vi.mock("../providers/registry.js", () => ({
   },
 }));
 
-const { getSyncStatus, runBackfill, startBackfill, riskFlagFor, persistThread } = await import(
-  "./sync.js"
-);
+const { getSyncStatus, runBackfill, startBackfill, riskFlagFor, persistThread } =
+  await import("./sync.js");
 const { mapThread } = await import("../providers/gmail/map.js");
 
 const USER_ID = "cldd4kzai000008l3a1b2c3d4";
@@ -109,7 +108,9 @@ function stubTransaction(): void {
 }
 
 function statusWrites(): unknown[] {
-  return writes.filter((write) => write.field === "syncStatus").map((write) => write.value);
+  return writes
+    .filter((write) => write.field === "syncStatus")
+    .map((write) => write.value);
 }
 
 describe("startBackfill", () => {
@@ -123,7 +124,10 @@ describe("startBackfill", () => {
   });
 
   it("queues a job keyed on the mailbox", async () => {
-    const result = await startBackfill({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+    const result = await startBackfill({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+    });
 
     expect(result).toEqual({
       enqueued: true,
@@ -141,7 +145,10 @@ describe("startBackfill", () => {
     // Pressing "Sync now" twice must not cost twice the Gmail quota.
     getJob.mockResolvedValue({ getState: async () => "active", remove: vi.fn() });
 
-    const result = await startBackfill({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+    const result = await startBackfill({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+    });
 
     expect(result.enqueued).toBe(false);
     expect(add).not.toHaveBeenCalled();
@@ -151,7 +158,10 @@ describe("startBackfill", () => {
     const remove = vi.fn();
     getJob.mockResolvedValue({ getState: async () => "completed", remove });
 
-    const result = await startBackfill({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+    const result = await startBackfill({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+    });
 
     expect(remove).toHaveBeenCalled();
     expect(result.enqueued).toBe(true);
@@ -351,7 +361,11 @@ describe("runBackfill", () => {
 
   it("skips a thread that came back with no messages", async () => {
     listThreadIds.mockResolvedValue({ items: ["t1"], nextPageToken: null });
-    getThread.mockResolvedValue({ providerThreadId: "t1", historyId: null, messages: [] });
+    getThread.mockResolvedValue({
+      providerThreadId: "t1",
+      historyId: null,
+      messages: [],
+    });
 
     const progress = await runBackfill(job);
 
@@ -392,7 +406,9 @@ describe("runBackfill resumption", () => {
     const cursorCheckpoint = writes.find((w) => w.field === "backfillCursor");
     expect(cursorCheckpoint?.value).toBe("555000");
     // The token stored after page one is the token for page two.
-    const tokens = writes.filter((w) => w.field === "backfillPageToken").map((w) => w.value);
+    const tokens = writes
+      .filter((w) => w.field === "backfillPageToken")
+      .map((w) => w.value);
     expect(tokens).toContain("page-2");
   });
 
@@ -441,8 +457,12 @@ describe("runBackfill resumption", () => {
 
     await runBackfill(job);
 
-    const finalTokenWrite = [...writes].reverse().find((w) => w.field === "backfillPageToken");
-    const finalCursorWrite = [...writes].reverse().find((w) => w.field === "backfillCursor");
+    const finalTokenWrite = [...writes]
+      .reverse()
+      .find((w) => w.field === "backfillPageToken");
+    const finalCursorWrite = [...writes]
+      .reverse()
+      .find((w) => w.field === "backfillCursor");
     expect(finalTokenWrite?.value).toBeNull();
     expect(finalCursorWrite?.value).toBeNull();
   });
@@ -598,7 +618,9 @@ describe("persistThread", () => {
     await persist();
 
     // Idempotency: the same thread written twice must not grow its attachments.
-    expect(attachmentDeleteMany).toHaveBeenCalledWith({ where: { messageId: "message-row-1" } });
+    expect(attachmentDeleteMany).toHaveBeenCalledWith({
+      where: { messageId: "message-row-1" },
+    });
     const created = attachmentCreateMany.mock.calls[0]?.[0] as { data: unknown[] };
     expect(created.data).toHaveLength(2);
   });
@@ -642,7 +664,10 @@ describe("getSyncStatus", () => {
   });
 
   it("reports counts and cursor state", async () => {
-    const status = await getSyncStatus({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+    const status = await getSyncStatus({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+    });
 
     expect(status).toMatchObject({
       syncStatus: "ACTIVE",
@@ -661,7 +686,10 @@ describe("getSyncStatus", () => {
       failedReason: null,
     });
 
-    const status = await getSyncStatus({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+    const status = await getSyncStatus({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+    });
 
     expect(status.job).toEqual({
       state: "active",
@@ -679,7 +707,10 @@ describe("getSyncStatus", () => {
       failedReason: "y".repeat(900),
     });
 
-    const status = await getSyncStatus({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID });
+    const status = await getSyncStatus({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+    });
     expect(status.job?.failedReason?.length).toBe(300);
   });
 

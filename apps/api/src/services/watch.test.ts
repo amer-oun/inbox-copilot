@@ -121,9 +121,10 @@ describe("ensureWatch", () => {
       mailbox({ watchExpiresAt: new Date(Date.now() + 6 * DAY) }),
     );
 
-    expect((await ensureWatch({ userId: USER_ID, mailAccountId: ACCOUNT_ID, force: true })).started).toBe(
-      true,
-    );
+    expect(
+      (await ensureWatch({ userId: USER_ID, mailAccountId: ACCOUNT_ID, force: true }))
+        .started,
+    ).toBe(true);
   });
 
   it("refuses when push is not configured", async () => {
@@ -146,9 +147,9 @@ describe("ensureWatch", () => {
   it("skips a non-Gmail mailbox", async () => {
     accountFindFirst.mockResolvedValue(mailbox({ provider: "OUTLOOK" }));
 
-    expect((await ensureWatch({ userId: USER_ID, mailAccountId: ACCOUNT_ID })).skipped).toBe(
-      "not-gmail",
-    );
+    expect(
+      (await ensureWatch({ userId: USER_ID, mailAccountId: ACCOUNT_ID })).skipped,
+    ).toBe("not-gmail");
   });
 });
 
@@ -259,7 +260,9 @@ describe("runWatchKeeper", () => {
       mailbox({ id: "mail_2", userId: "user_2" }),
     ]);
     accountFindFirst.mockImplementation(({ where }: { where: { id: string } }) =>
-      Promise.resolve(mailbox({ id: where.id, userId: where.id === "mail_2" ? "user_2" : USER_ID })),
+      Promise.resolve(
+        mailbox({ id: where.id, userId: where.id === "mail_2" ? "user_2" : USER_ID }),
+      ),
     );
     startWatch.mockRejectedValueOnce(new Error("grant is gone"));
 

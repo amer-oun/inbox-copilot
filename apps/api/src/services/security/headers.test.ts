@@ -74,12 +74,12 @@ describe("parseStoredAuthResults", () => {
   });
 
   it("treats anything but true as 'no mismatch found', not 'the name is fine'", () => {
-    expect(parseStoredAuthResults(auth({ displayNameMismatch: "yes" })).displayNameMismatch).toBe(
-      false,
-    );
-    expect(parseStoredAuthResults(auth({ displayNameMismatch: true })).displayNameMismatch).toBe(
-      true,
-    );
+    expect(
+      parseStoredAuthResults(auth({ displayNameMismatch: "yes" })).displayNameMismatch,
+    ).toBe(false);
+    expect(
+      parseStoredAuthResults(auth({ displayNameMismatch: true })).displayNameMismatch,
+    ).toBe(true);
   });
 });
 
@@ -162,7 +162,11 @@ describe("dmarcVouchesFor", () => {
      * underlying results moot — a `dmarc=pass` with `spf=fail` is ordinary forwarded
      * mail. Nothing else may stand in for that pass.
      */
-    const base = { authResults: auth({ spf: "fail" }), fromEmail: "a@b.test", replyTo: null };
+    const base = {
+      authResults: auth({ spf: "fail" }),
+      fromEmail: "a@b.test",
+      replyTo: null,
+    };
 
     expect(dmarcVouchesFor(headerSignals(base))).toBe(true);
     expect(

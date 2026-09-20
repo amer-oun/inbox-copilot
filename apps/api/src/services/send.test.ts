@@ -105,9 +105,10 @@ describe("parseFormattedAddress", () => {
      * "billing@bank.example <attacker@evil.test>" be parsed as the bank — and the
      * reply would go to the attacker with a reassuring name on it.
      */
-    expect(
-      parseFormattedAddress("billing@bank.example <attacker@evil.test>"),
-    ).toEqual({ name: "billing@bank.example", email: "attacker@evil.test" });
+    expect(parseFormattedAddress("billing@bank.example <attacker@evil.test>")).toEqual({
+      name: "billing@bank.example",
+      email: "attacker@evil.test",
+    });
   });
 
   it("handles a bare address and rejects nothing useful", () => {
@@ -129,7 +130,10 @@ describe("replyRecipients", () => {
 
   it("honours Reply-To", () => {
     expect(
-      replyRecipients(parent({ replyTo: "Billing <billing@northwind.example>" }), MAILBOX),
+      replyRecipients(
+        parent({ replyTo: "Billing <billing@northwind.example>" }),
+        MAILBOX,
+      ),
     ).toEqual([{ name: "Billing", email: "billing@northwind.example" }]);
   });
 
@@ -174,11 +178,15 @@ describe("referencesChain", () => {
   });
 
   it("is just the parent when the parent had no chain", () => {
-    expect(referencesChain(parent({ headers: {} }))).toEqual(["<parent@northwind.example>"]);
+    expect(referencesChain(parent({ headers: {} }))).toEqual([
+      "<parent@northwind.example>",
+    ]);
   });
 
   it("is empty when the parent has no Message-ID either", () => {
-    expect(referencesChain(parent({ headers: null, internetMessageId: null }))).toEqual([]);
+    expect(referencesChain(parent({ headers: null, internetMessageId: null }))).toEqual(
+      [],
+    );
   });
 
   it("keeps the oldest and newest of a very long chain", () => {
@@ -191,9 +199,9 @@ describe("referencesChain", () => {
   });
 
   it("ignores junk in the stored header", () => {
-    expect(referencesChain(parent({ headers: { references: "not-an-id  <ok@m.test>" } }))).toEqual(
-      ["<ok@m.test>", "<parent@northwind.example>"],
-    );
+    expect(
+      referencesChain(parent({ headers: { references: "not-an-id  <ok@m.test>" } })),
+    ).toEqual(["<ok@m.test>", "<parent@northwind.example>"]);
   });
 });
 
@@ -400,7 +408,11 @@ describe("the follow-up reminder", () => {
     });
 
     expect(createFollowUpReminder).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: USER_ID, threadId: THREAD_ID, watchedMessageId: "sent_1" }),
+      expect.objectContaining({
+        userId: USER_ID,
+        threadId: THREAD_ID,
+        watchedMessageId: "sent_1",
+      }),
     );
     expect(result.reminderId).toBe("cldd4kzai000908l3a1b2c3d4");
   });

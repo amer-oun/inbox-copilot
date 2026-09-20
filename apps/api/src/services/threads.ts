@@ -65,8 +65,10 @@ export function decodeCursor(value: string): Cursor {
   }
 
   const { score, lastMessageAt, id } = parsed as Record<string, unknown>;
-  const scoreOk = score === null || (typeof score === "number" && Number.isInteger(score));
-  const dateOk = typeof lastMessageAt === "string" && !Number.isNaN(Date.parse(lastMessageAt));
+  const scoreOk =
+    score === null || (typeof score === "number" && Number.isInteger(score));
+  const dateOk =
+    typeof lastMessageAt === "string" && !Number.isNaN(Date.parse(lastMessageAt));
 
   if (!scoreOk || !dateOk || typeof id !== "string" || id === "") {
     throw new BadRequestError("Invalid cursor");
@@ -177,9 +179,7 @@ export async function listThreads(input: ListThreadsInput): Promise<ThreadListDt
         id: row.id,
         subject: row.subject,
         snippet: row.snippet,
-        from: newest
-          ? { name: newest.fromName, email: newest.fromEmail }
-          : null,
+        from: newest ? { name: newest.fromName, email: newest.fromEmail } : null,
         messageCount: row.messageCount,
         lastMessageAt: row.lastMessageAt.toISOString(),
         isRead: row.isRead,

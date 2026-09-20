@@ -21,8 +21,8 @@ async function main(): Promise<void> {
   const shutdown = (signal: NodeJS.Signals): void => {
     logger.info({ signal }, "shutting down");
     server.close(() => {
-      void Promise.allSettled([disconnectRedis(), disconnectDatabase()]).then(
-        () => process.exit(0),
+      void Promise.allSettled([disconnectRedis(), disconnectDatabase()]).then(() =>
+        process.exit(0),
       );
     });
     // Don't hang forever on a stuck keep-alive connection.

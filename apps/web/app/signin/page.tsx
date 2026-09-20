@@ -64,8 +64,8 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
           <CardDescription>
-            We only ask for your name and email to create your account. Connecting
-            a mailbox is a separate step you control.
+            We only ask for your name and email to create your account. Connecting a
+            mailbox is a separate step you control.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -93,8 +93,8 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
       </Card>
 
       <p className="mt-6 text-xs leading-relaxed text-muted">
-        Inbox Copilot never sends email on your behalf. Every AI draft waits for
-        you to review and send it.
+        Inbox Copilot never sends email on your behalf. Every AI draft waits for you to
+        review and send it.
       </p>
     </main>
   );

@@ -25,7 +25,6 @@ import {
  * enforced at the granularity it is expressed in — calls.
  */
 
-
 export interface EnrichInput {
   userId: string;
   mailAccountId: string;
@@ -229,13 +228,15 @@ export async function runEnrich(
 
           result.threatLevel = threat.level;
           if (threat.fromCache) result.skipped.push("threat-cache");
-          if (threat.skipped !== undefined) result.skipped.push(`threat-${threat.skipped}`);
+          if (threat.skipped !== undefined)
+            result.skipped.push(`threat-${threat.skipped}`);
 
           // The thread carries the worst verdict among its messages, not the newest —
           // see `refreshThreadThreatLevel`.
           await refreshThreadThreatLevel(input.userId, threadId);
         } catch (error) {
-          if (error instanceof AiCapExceededError || error instanceof AiDisabledError) throw error;
+          if (error instanceof AiCapExceededError || error instanceof AiDisabledError)
+            throw error;
           if (isAbortError(error)) throw error;
           log.error({ err: error }, "threat assessment failed; message left unassessed");
           result.skipped.push("threat-failed");

@@ -107,7 +107,9 @@ describe("parsePrompt", () => {
 
 describe("stubClassification", () => {
   it("returns output that passes the real schema", () => {
-    expect(() => aiClassificationSchema.parse(stubClassification(promptFor()))).not.toThrow();
+    expect(() =>
+      aiClassificationSchema.parse(stubClassification(promptFor())),
+    ).not.toThrow();
   });
 
   it("is deterministic for the same email", () => {
@@ -162,7 +164,8 @@ describe("stubClassification", () => {
       stubClassification(
         promptFor({
           subject: "Vous avez partagé certaines données de votre compte",
-          bodyText: "Bonjour, nous vous informons que votre compte a été mis à jour. Merci.",
+          bodyText:
+            "Bonjour, nous vous informons que votre compte a été mis à jour. Merci.",
         }),
       ).language,
     ).toBe("fr");
@@ -216,7 +219,9 @@ describe("stubSummary", () => {
 
   it("says plainly that it is stubbed", () => {
     // Anyone reading this row in the database must not mistake it for model output.
-    expect(stubSummary(threadPromptFor([message()])).summary).toContain("[stubbed summary]");
+    expect(stubSummary(threadPromptFor([message()])).summary).toContain(
+      "[stubbed summary]",
+    );
   });
 
   it("describes the thread it was given", () => {
@@ -234,7 +239,9 @@ describe("stubSummary", () => {
   });
 
   it("proposes an action item only when something was asked", () => {
-    const asked = stubSummary(threadPromptFor([message({ bodyText: "Can you confirm?" })]));
+    const asked = stubSummary(
+      threadPromptFor([message({ bodyText: "Can you confirm?" })]),
+    );
     const told = stubSummary(threadPromptFor([message({ bodyText: "Confirmed." })]));
 
     expect(asked.actionItems).toHaveLength(1);
@@ -364,7 +371,9 @@ describe("the stubbed reply drafts", () => {
       replyRequestBlock({ tone: "CONCISE", style: null }),
     ].join("\n\n");
 
-    expect(stubReplyVariants(noStyle).variants[0]?.body.startsWith("Hi Dana,")).toBe(true);
+    expect(stubReplyVariants(noStyle).variants[0]?.body.startsWith("Hi Dana,")).toBe(
+      true,
+    );
   });
 
   it("cannot be steered by instructions in the thread", () => {
@@ -487,7 +496,9 @@ describe("the stubbed threat assessment", () => {
   }
 
   it("returns a valid assessment", () => {
-    expect(() => aiThreatAssessmentSchema.parse(stubThreatAssessment(prompt()))).not.toThrow();
+    expect(() =>
+      aiThreatAssessmentSchema.parse(stubThreatAssessment(prompt())),
+    ).not.toThrow();
   });
 
   it("labels itself as stubbed", () => {
@@ -553,9 +564,10 @@ describe("the stubbed threat assessment", () => {
   it("always answers SAFE, so a dev run shows the union holding the floor", () => {
     // Deliberate: the §6 case worth seeing locally is the model disagreeing downward, and
     // the banner a developer sees is then one the rules held up on their own.
-    expect(stubThreatAssessment(prompt({ ruleFloor: "SUSPICIOUS", ruleScore: 70 })).assessedLevel).toBe(
-      "SAFE",
-    );
+    expect(
+      stubThreatAssessment(prompt({ ruleFloor: "SUSPICIOUS", ruleScore: 70 }))
+        .assessedLevel,
+    ).toBe("SAFE");
   });
 });
 

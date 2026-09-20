@@ -8,10 +8,7 @@
           "message": {
             "id": "msg-new-1",
             "threadId": "thread-a",
-            "labelIds": [
-              "INBOX",
-              "UNREAD"
-            ]
+            "labelIds": ["INBOX", "UNREAD"]
           }
         }
       ]
@@ -24,9 +21,7 @@
             "id": "msg-new-1",
             "threadId": "thread-a"
           },
-          "labelIds": [
-            "UNREAD"
-          ]
+          "labelIds": ["UNREAD"]
         }
       ]
     },
@@ -38,9 +33,7 @@
             "id": "msg-old-9",
             "threadId": "thread-b"
           },
-          "labelIds": [
-            "STARRED"
-          ]
+          "labelIds": ["STARRED"]
         }
       ]
     },
@@ -51,9 +44,7 @@
           "message": {
             "id": "msg-new-2",
             "threadId": "thread-c",
-            "labelIds": [
-              "INBOX"
-            ]
+            "labelIds": ["INBOX"]
           }
         }
       ]

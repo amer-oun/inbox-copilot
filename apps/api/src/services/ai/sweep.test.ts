@@ -66,9 +66,11 @@ beforeEach(() => {
     dailyAiCallCap: 500,
   });
   mailAccountFindMany.mockReset().mockResolvedValue([{ userId: USER_ID }]);
-  enqueueEnrichment.mockReset().mockImplementation(
-    async ({ messageIds }: { messageIds: string[] }) => messageIds.length,
-  );
+  enqueueEnrichment
+    .mockReset()
+    .mockImplementation(
+      async ({ messageIds }: { messageIds: string[] }) => messageIds.length,
+    );
 });
 
 describe("findUnenrichedMessages", () => {
@@ -85,7 +87,11 @@ describe("findUnenrichedMessages", () => {
   });
 
   it("can be narrowed to one mailbox", async () => {
-    await findUnenrichedMessages({ userId: USER_ID, mailAccountId: MAIL_ACCOUNT_ID, limit: 10 });
+    await findUnenrichedMessages({
+      userId: USER_ID,
+      mailAccountId: MAIL_ACCOUNT_ID,
+      limit: 10,
+    });
 
     expect(messageFindMany.mock.calls[0]?.[0]).toMatchObject({
       where: { mailAccountId: MAIL_ACCOUNT_ID, classification: { is: null } },
@@ -207,7 +213,11 @@ describe("sweepUserEnrichment", () => {
 
     // Renamed from `force`, which now means "recompute cached rows" — two unrelated
     // overrides should not share one name.
-    const result = await sweepUserEnrichment({ userId: USER_ID, ignoreCap: true, limit: 50 });
+    const result = await sweepUserEnrichment({
+      userId: USER_ID,
+      ignoreCap: true,
+      limit: 50,
+    });
 
     expect(result.queued).toBe(3);
     expect(messageFindMany.mock.calls[0]?.[0].take).toBe(50);
@@ -422,14 +432,12 @@ describe("sweepAllEnrichment", () => {
   it("keeps going when one user's sweep fails", async () => {
     // On a schedule, aborting halfway would leave an arbitrary subset done.
     mailAccountFindMany.mockResolvedValue([{ userId: "u1" }, { userId: "u2" }]);
-    settingsFindFirst
-      .mockRejectedValueOnce(new Error("db blip"))
-      .mockResolvedValue({
-        aiEnabled: true,
-        autoSummarize: true,
-        autoCategorize: true,
-        dailyAiCallCap: 500,
-      });
+    settingsFindFirst.mockRejectedValueOnce(new Error("db blip")).mockResolvedValue({
+      aiEnabled: true,
+      autoSummarize: true,
+      autoCategorize: true,
+      dailyAiCallCap: 500,
+    });
 
     const results = await sweepAllEnrichment();
 

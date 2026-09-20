@@ -57,7 +57,9 @@ export async function findUnenrichedMessages(input: {
 }): Promise<UnenrichedMessage[]> {
   const rows = await dbForUser(input.userId).message.findMany({
     where: {
-      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      ...(input.mailAccountId === undefined
+        ? {}
+        : { mailAccountId: input.mailAccountId }),
       // The relation filter is the whole point: no row means never classified.
       classification: { is: null },
     },
@@ -140,7 +142,9 @@ export async function findUnassessedMessages(input: {
 }): Promise<UnenrichedMessage[]> {
   const rows = await dbForUser(input.userId).message.findMany({
     where: {
-      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      ...(input.mailAccountId === undefined
+        ? {}
+        : { mailAccountId: input.mailAccountId }),
       isOutbound: false,
       classification: { is: { threatLevel: "UNKNOWN" } },
     },
@@ -189,7 +193,9 @@ export async function findMessagesToRecompute(input: {
 }): Promise<RecomputeWork> {
   const rows = await dbForUser(input.userId).message.findMany({
     where: {
-      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      ...(input.mailAccountId === undefined
+        ? {}
+        : { mailAccountId: input.mailAccountId }),
     },
     orderBy: { sentAt: "desc" },
     take: input.limit ?? SWEEP_USER_LIMIT,
@@ -221,9 +227,7 @@ export async function findMessagesToRecompute(input: {
  * mailboxes must not have one's messages queued under the other's id — the tenancy read
  * in `runEnrich` filters on both, so a mismatched pair silently finds nothing.
  */
-function groupByMailbox(
-  messages: readonly UnenrichedMessage[],
-): Map<string, string[]> {
+function groupByMailbox(messages: readonly UnenrichedMessage[]): Map<string, string[]> {
   const byMailbox = new Map<string, string[]>();
   for (const message of messages) {
     const existing = byMailbox.get(message.mailAccountId);
@@ -310,7 +314,9 @@ export async function sweepUserEnrichment(input: {
   if (input.recompute) {
     const work = await findMessagesToRecompute({
       userId: input.userId,
-      ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+      ...(input.mailAccountId === undefined
+        ? {}
+        : { mailAccountId: input.mailAccountId }),
       limit,
     });
 
@@ -322,7 +328,9 @@ export async function sweepUserEnrichment(input: {
     // user to wonder why only part of the mailbox changed.
     const total = await dbForUser(input.userId).message.count({
       where: {
-        ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+        ...(input.mailAccountId === undefined
+          ? {}
+          : { mailAccountId: input.mailAccountId }),
       },
     });
 
@@ -376,7 +384,9 @@ export async function sweepUserEnrichment(input: {
       ? []
       : await findThreadsMissingSummaries({
           userId: input.userId,
-          ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+          ...(input.mailAccountId === undefined
+            ? {}
+            : { mailAccountId: input.mailAccountId }),
           limit: remaining,
         });
 
@@ -398,7 +408,9 @@ export async function sweepUserEnrichment(input: {
       : (
           await findUnassessedMessages({
             userId: input.userId,
-            ...(input.mailAccountId === undefined ? {} : { mailAccountId: input.mailAccountId }),
+            ...(input.mailAccountId === undefined
+              ? {}
+              : { mailAccountId: input.mailAccountId }),
             limit: afterSummaries,
           })
         ).filter((message) => !seen.has(message.id));
@@ -413,7 +425,11 @@ export async function sweepUserEnrichment(input: {
 
   let queued = 0;
   for (const [mailAccountId, messageIds] of byMailbox) {
-    queued += await enqueueEnrichment({ userId: input.userId, mailAccountId, messageIds });
+    queued += await enqueueEnrichment({
+      userId: input.userId,
+      mailAccountId,
+      messageIds,
+    });
   }
 
   log.info(
@@ -467,7 +483,10 @@ export async function sweepAllEnrichment(
   }
 
   const totals = results.reduce(
-    (sum, result) => ({ found: sum.found + result.found, queued: sum.queued + result.queued }),
+    (sum, result) => ({
+      found: sum.found + result.found,
+      queued: sum.queued + result.queued,
+    }),
     { found: 0, queued: 0 },
   );
   logger.info({ users: owners.length, ...totals }, "enrichment sweep complete");

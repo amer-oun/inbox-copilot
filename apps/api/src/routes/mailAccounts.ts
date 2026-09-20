@@ -72,6 +72,7 @@ mailAccountsRouter.get("/mail-accounts/:mailAccountId/sync-status", async (req, 
   const { id: userId } = currentUser(req);
   const { mailAccountId } = mailAccountIdParamsSchema.parse(req.params);
 
-  res.json(syncStatusResponseSchema.parse(await getSyncStatus({ userId, mailAccountId })));
+  res.json(
+    syncStatusResponseSchema.parse(await getSyncStatus({ userId, mailAccountId })),
+  );
 });
-

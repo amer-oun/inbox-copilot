@@ -284,7 +284,9 @@ describe("the rules", () => {
     expect(withIp.floor).toBe("SUSPICIOUS");
 
     const withExe = evaluateRules(
-      cleanSignals({ attachments: [{ filename: "invoice.exe", riskFlag: "executable" }] }),
+      cleanSignals({
+        attachments: [{ filename: "invoice.exe", riskFlag: "executable" }],
+      }),
     );
     expect(withExe.floor).toBe("SUSPICIOUS");
     expect(withExe.reasons.join(" ")).toContain("invoice.exe");
@@ -299,7 +301,13 @@ describe("the rules", () => {
     const everything = evaluateRules(
       cleanSignals({
         header: headerSignals({
-          authResults: { spf: "fail", dkim: "fail", dmarc: "fail", returnPath: null, displayNameMismatch: true },
+          authResults: {
+            spf: "fail",
+            dkim: "fail",
+            dmarc: "fail",
+            returnPath: null,
+            displayNameMismatch: true,
+          },
           fromEmail: "security@pаypal.com",
           replyTo: "collect@other.test",
         }),
@@ -309,7 +317,12 @@ describe("the rules", () => {
           punycodeHosts: ["xn--pypal-4ve.com"],
           displayMismatches: [{ shownHost: "paypal.com", actualHost: "evil.test" }],
           lookalikeHosts: [
-            { domain: "paypa1.com", resembles: "paypal.com", distance: 0, viaHomoglyphs: true },
+            {
+              domain: "paypa1.com",
+              resembles: "paypal.com",
+              distance: 0,
+              viaHomoglyphs: true,
+            },
           ],
         },
         sender: {
@@ -477,7 +490,8 @@ function message(overrides: Record<string, unknown> = {}) {
     cc: [],
     replyTo: null,
     sentAt: new Date("2026-09-14T09:00:00Z"),
-    bodyText: "Your annual renewal of 49.00 has been processed. Thanks for staying with us.",
+    bodyText:
+      "Your annual renewal of 49.00 has been processed. Thanks for staying with us.",
     bodyHtml: null,
     snippet: "Your annual renewal",
     isOutbound: false,
@@ -623,7 +637,10 @@ describe("assessMessageThreat", () => {
 
     const request = create.mock.calls[0]?.[0];
     expect(request.tools).toHaveLength(1);
-    expect(request.tool_choice).toEqual({ type: "tool", name: "record_threat_assessment" });
+    expect(request.tool_choice).toEqual({
+      type: "tool",
+      name: "record_threat_assessment",
+    });
     expect(Object.keys(request.tools[0].input_schema.properties).sort()).toEqual([
       "assessedLevel",
       "confidence",

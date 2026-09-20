@@ -183,7 +183,9 @@ export function zonedWallTimeToUtc(wall: string, timeZone: string): Date {
     0,
   );
 
-  const firstGuess = new Date(naive - offsetMinutesAt(new Date(naive), timeZone) * 60_000);
+  const firstGuess = new Date(
+    naive - offsetMinutesAt(new Date(naive), timeZone) * 60_000,
+  );
   const corrected = new Date(naive - offsetMinutesAt(firstGuess, timeZone) * 60_000);
 
   if (Number.isNaN(corrected.getTime())) {

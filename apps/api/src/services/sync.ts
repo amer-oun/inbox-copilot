@@ -8,11 +8,7 @@ import {
 import { ConflictError, NotFoundError } from "../lib/errors.js";
 import { AbortedError, isAbortError } from "../lib/retry.js";
 import { logger } from "../lib/logger.js";
-import {
-  backfillJobId,
-  syncBackfillQueue,
-  type BackfillJob,
-} from "../lib/queues.js";
+import { backfillJobId, syncBackfillQueue, type BackfillJob } from "../lib/queues.js";
 import { enqueueEnrichment } from "./ai/enrich.js";
 import { enqueueStyleProfile } from "./ai/style.js";
 import { ensureWatch, pushConfigured } from "./watch.js";
@@ -545,7 +541,8 @@ function formatAddress(address: { name?: string; email: string }): string {
  * the MIME type is supplied by the sender and lies, the extension is what the
  * user's OS will act on.
  */
-const EXECUTABLE_EXTENSIONS = /\.(exe|scr|com|pif|bat|cmd|js|jse|vbs|vbe|wsf|hta|jar|msi|ps1|lnk|apk|dmg)$/i;
+const EXECUTABLE_EXTENSIONS =
+  /\.(exe|scr|com|pif|bat|cmd|js|jse|vbs|vbe|wsf|hta|jar|msi|ps1|lnk|apk|dmg)$/i;
 const MACRO_EXTENSIONS = /\.(docm|xlsm|pptm|dotm|xltm|xlam)$/i;
 const ARCHIVE_EXTENSIONS = /\.(zip|rar|7z|tar|gz|bz2|iso|cab)$/i;
 

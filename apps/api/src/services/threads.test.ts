@@ -56,7 +56,11 @@ function row(overrides: Record<string, unknown> = {}) {
     language: "en",
     threatLevel: "UNKNOWN",
     messages: [
-      { fromName: "Dana Whitfield", fromEmail: "dana@northwind.example", hasAttachments: true },
+      {
+        fromName: "Dana Whitfield",
+        fromEmail: "dana@northwind.example",
+        hasAttachments: true,
+      },
     ],
     summaries: [{ headline: "Invoice 4471 disputed" }],
     ...overrides,
@@ -232,9 +236,24 @@ describe("listThreads pagination", () => {
   it.each([
     ["not base64", "!!!!"],
     ["base64 of nonsense", Buffer.from("nonsense").toString("base64url")],
-    ["missing id", Buffer.from(JSON.stringify({ score: 1, lastMessageAt: "2026-01-01" })).toString("base64url")],
-    ["bad date", Buffer.from(JSON.stringify({ score: 1, lastMessageAt: "soon", id: "a" })).toString("base64url")],
-    ["non-integer score", Buffer.from(JSON.stringify({ score: 1.5, lastMessageAt: "2026-01-01", id: "a" })).toString("base64url")],
+    [
+      "missing id",
+      Buffer.from(JSON.stringify({ score: 1, lastMessageAt: "2026-01-01" })).toString(
+        "base64url",
+      ),
+    ],
+    [
+      "bad date",
+      Buffer.from(JSON.stringify({ score: 1, lastMessageAt: "soon", id: "a" })).toString(
+        "base64url",
+      ),
+    ],
+    [
+      "non-integer score",
+      Buffer.from(
+        JSON.stringify({ score: 1.5, lastMessageAt: "2026-01-01", id: "a" }),
+      ).toString("base64url"),
+    ],
     ["array", Buffer.from(JSON.stringify([1, 2])).toString("base64url")],
   ])("rejects a malformed cursor (%s) with 400", (_label, cursor) => {
     // Cursors come from the browser: a bad one is a bad request, never a crash and
@@ -338,7 +357,8 @@ describe("getThread", () => {
           isRead: true,
           isOutbound: false,
           bodyText: "Could you send a revised invoice?",
-          bodyHtml: '<p onclick="alert(1)">Revised invoice?</p><img src="https://t.example/p.gif">',
+          bodyHtml:
+            '<p onclick="alert(1)">Revised invoice?</p><img src="https://t.example/p.gif">',
           attachments: [],
         },
       ],
@@ -359,9 +379,14 @@ describe("getThread", () => {
   it("returns the thread with messages oldest first", async () => {
     threadFindFirst.mockResolvedValue(detailRow());
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
-    expect(threadFindFirst.mock.calls[0]?.[0].select.messages.orderBy).toEqual({ sentAt: "asc" });
+    expect(threadFindFirst.mock.calls[0]?.[0].select.messages.orderBy).toEqual({
+      sentAt: "asc",
+    });
     expect(thread.messages).toHaveLength(1);
     expect(thread.summary?.headline).toBe("Invoice 4471 disputed");
   });
@@ -369,7 +394,10 @@ describe("getThread", () => {
   it("sanitizes message HTML on the way out", async () => {
     threadFindFirst.mockResolvedValue(detailRow());
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
     const body = thread.messages[0]?.bodyHtmlSanitized ?? "";
 
     // The stored row keeps what the sender sent; the wire gets it cleaned.
@@ -383,7 +411,10 @@ describe("getThread", () => {
     // downstream can reach for unsanitized HTML — there is none to reach for.
     threadFindFirst.mockResolvedValue(detailRow());
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     expect(thread.messages[0]).not.toHaveProperty("bodyHtml");
     expect(JSON.stringify(thread)).not.toContain("onclick");
@@ -396,7 +427,10 @@ describe("getThread", () => {
       messages: [{ ...base.messages[0], bodyHtml: null }],
     });
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     expect(thread.messages[0]?.bodyHtmlSanitized).toBeNull();
     expect(thread.messages[0]?.bodyText).toContain("revised invoice");
@@ -408,7 +442,10 @@ describe("getThread", () => {
     // "we looked and it was fine".
     threadFindFirst.mockResolvedValue(detailRow());
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     expect(thread.threat).toBeNull();
   });
@@ -435,7 +472,8 @@ describe("getThread", () => {
             ],
             ruleSignals: { version: 1, score: 75, floor: "SUSPICIOUS" },
             threatIntent: "INVOICE_FRAUD",
-            threatExplanation: "The bank details differ from the ones on your earlier invoices.",
+            threatExplanation:
+              "The bank details differ from the ones on your earlier invoices.",
             threatModel: "claude-opus-5",
           },
           threatAppeal: null,
@@ -443,7 +481,10 @@ describe("getThread", () => {
       ],
     });
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     expect(thread.threat).toMatchObject({
       messageId: "cm00000000000000000000010",
@@ -483,7 +524,10 @@ describe("getThread", () => {
       ],
     });
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     // The verdict stands in the data; the banner is what stands down.
     expect(thread.threat?.level).toBe("SUSPICIOUS");
@@ -492,7 +536,10 @@ describe("getThread", () => {
 
   it("tells the UI who a reply would go to", async () => {
     threadFindFirst.mockResolvedValue(detailRow());
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     expect(thread.replyRecipients).toEqual([
       { name: "Dana Whitfield", email: "dana@northwind.example" },
@@ -506,7 +553,10 @@ describe("getThread", () => {
       messages: [{ ...base.messages[0], replyTo: "Billing <billing@northwind.example>" }],
     });
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     // Computed by the send path's own function, so the address on the button cannot
     // disagree with the address the reply is actually addressed to.
@@ -532,14 +582,20 @@ describe("getThread", () => {
       ],
     });
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
     expect(thread.replyRecipients).toEqual([]);
   });
 
   it("returns null summary for a thread below the threshold", async () => {
     threadFindFirst.mockResolvedValue(detailRow({ summaries: [] }));
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
     expect(thread.summary).toBeNull();
   });
 
@@ -555,10 +611,15 @@ describe("getThread", () => {
   it("survives a malformed participants column", async () => {
     // It is our JSON, but shaped from sender-supplied headers.
     threadFindFirst.mockResolvedValue(
-      detailRow({ participants: ["nonsense", { email: 42 }, { email: "ok@example.com" }] }),
+      detailRow({
+        participants: ["nonsense", { email: 42 }, { email: "ok@example.com" }],
+      }),
     );
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
 
     expect(thread.participants).toEqual([{ name: null, email: "ok@example.com" }]);
   });
@@ -566,7 +627,10 @@ describe("getThread", () => {
   it("survives participants being something other than an array", async () => {
     threadFindFirst.mockResolvedValue(detailRow({ participants: null }));
 
-    const thread = await getThread({ userId: USER_ID, threadId: "cm00000000000000000000001" });
+    const thread = await getThread({
+      userId: USER_ID,
+      threadId: "cm00000000000000000000001",
+    });
     expect(thread.participants).toEqual([]);
   });
 });

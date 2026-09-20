@@ -5,12 +5,7 @@
     {
       "id": "18f0a1b2c3d4e5f6",
       "threadId": "18f0a1b2c3d4e5f0",
-      "labelIds": [
-        "INBOX",
-        "UNREAD",
-        "IMPORTANT",
-        "CATEGORY_PERSONAL"
-      ],
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_PERSONAL"],
       "snippet": "Hi there — the invoice for March is attached, let me know if anything looks off.",
       "internalDate": "1741003200000",
       "payload": {
@@ -148,9 +143,7 @@
     {
       "id": "18f0a1b2c3d4e601",
       "threadId": "18f0a1b2c3d4e5f0",
-      "labelIds": [
-        "SENT"
-      ],
+      "labelIds": ["SENT"],
       "snippet": "Thanks — paid this morning.",
       "internalDate": "1741089600000",
       "payload": {

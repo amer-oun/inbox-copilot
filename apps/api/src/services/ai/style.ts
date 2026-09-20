@@ -133,7 +133,10 @@ export function averageSentenceLength(texts: readonly string[]): number {
 
   for (const text of texts) {
     for (const part of text.split(/[.!?]+(?:\s|$)/)) {
-      const count = part.trim().split(/\s+/).filter((word) => word.length > 0).length;
+      const count = part
+        .trim()
+        .split(/\s+/)
+        .filter((word) => word.length > 0).length;
       // A one-word "fragment" is usually a list item or an abbreviation's leftovers,
       // not a sentence, and counting those would drag the average toward one.
       if (count < 2) continue;
@@ -215,7 +218,9 @@ export async function buildWritingStyle(
   const log = logger.child({ userId: input.userId });
   const db = dbForUser(input.userId);
 
-  const existing = await db.userWritingStyle.findFirst({ where: { userId: input.userId } });
+  const existing = await db.userWritingStyle.findFirst({
+    where: { userId: input.userId },
+  });
 
   if (
     input.force !== true &&
@@ -223,7 +228,11 @@ export async function buildWritingStyle(
     existing.sampleCount >= STYLE_MIN_SAMPLES &&
     Date.now() - existing.updatedAt.getTime() < STYLE_MAX_AGE_MS
   ) {
-    return { style: toDto(existing), skipped: "fresh", sampleCount: existing.sampleCount };
+    return {
+      style: toDto(existing),
+      skipped: "fresh",
+      sampleCount: existing.sampleCount,
+    };
   }
 
   const rows = await db.message.findMany({
@@ -404,7 +413,10 @@ export async function enqueueStyleProfile(input: {
 
     await queue.add(
       "style",
-      { userId: input.userId, ...(input.force === true ? { force: true } : {}) } satisfies AiStyleJob,
+      {
+        userId: input.userId,
+        ...(input.force === true ? { force: true } : {}),
+      } satisfies AiStyleJob,
       { jobId },
     );
     return true;

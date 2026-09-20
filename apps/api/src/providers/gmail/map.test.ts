@@ -94,8 +94,14 @@ describe("MIME tree walk", () => {
     const payload: gmail_v1.Schema$MessagePart = {
       mimeType: "multipart/alternative",
       parts: [
-        { mimeType: "text/plain", body: { data: Buffer.from("first").toString("base64url") } },
-        { mimeType: "text/plain", body: { data: Buffer.from("second").toString("base64url") } },
+        {
+          mimeType: "text/plain",
+          body: { data: Buffer.from("first").toString("base64url") },
+        },
+        {
+          mimeType: "text/plain",
+          body: { data: Buffer.from("second").toString("base64url") },
+        },
       ],
     };
     expect(walkParts(payload).text).toBe("first");
@@ -136,7 +142,10 @@ describe("Authentication-Results parsing", () => {
 
   it("reports a missing verdict as null, never as a pass", () => {
     // A header that says nothing about DKIM must not be read as DKIM passing.
-    const results = parseAuthResults(new Map([["authentication-results", "mx.google.com; spf=pass"]]), null);
+    const results = parseAuthResults(
+      new Map([["authentication-results", "mx.google.com; spf=pass"]]),
+      null,
+    );
     expect(results.spf).toBe("pass");
     expect(results.dkim).toBeNull();
     expect(results.dmarc).toBeNull();
@@ -154,7 +163,10 @@ describe("Authentication-Results parsing", () => {
   });
 
   it("ignores a verdict word it does not recognise", () => {
-    const results = parseAuthResults(new Map([["authentication-results", "x; spf=banana"]]), null);
+    const results = parseAuthResults(
+      new Map([["authentication-results", "x; spf=banana"]]),
+      null,
+    );
     expect(results.spf).toBeNull();
   });
 });
@@ -165,7 +177,9 @@ describe("display-name spoofing", () => {
   });
 
   it("does not flag a display name with no address in it", () => {
-    expect(hasDisplayNameMismatch({ name: "Acme Billing", email: "a@b.test" })).toBe(false);
+    expect(hasDisplayNameMismatch({ name: "Acme Billing", email: "a@b.test" })).toBe(
+      false,
+    );
   });
 
   it("does not flag a display name repeating its own address", () => {
@@ -176,7 +190,9 @@ describe("display-name spoofing", () => {
 describe("content hash", () => {
   it("is the sha256 of the normalized plain-text body", () => {
     const body = invoice.messages[0]?.bodyText ?? "";
-    const expected = createHash("sha256").update(normalizeForHash(body), "utf8").digest("hex");
+    const expected = createHash("sha256")
+      .update(normalizeForHash(body), "utf8")
+      .digest("hex");
     expect(invoice.messages[0]?.contentHash).toBe(expected);
   });
 

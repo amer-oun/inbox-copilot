@@ -8,9 +8,9 @@ import { redactUrl } from "./logger.js";
  */
 describe("redactUrl", () => {
   it("redacts the authorization code and state", () => {
-    expect(
-      redactUrl("/oauth/google/callback?code=4/0AX4Xxyz&state=abc.def"),
-    ).toBe("/oauth/google/callback?code=%5Bredacted%5D&state=%5Bredacted%5D");
+    expect(redactUrl("/oauth/google/callback?code=4/0AX4Xxyz&state=abc.def")).toBe(
+      "/oauth/google/callback?code=%5Bredacted%5D&state=%5Bredacted%5D",
+    );
   });
 
   it("redacts token-bearing parameters whatever their case", () => {

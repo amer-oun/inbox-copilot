@@ -66,7 +66,10 @@ export interface MessageCardProps {
   defaultTranslationLang?: string | null;
 }
 
-export function MessageCard({ message, defaultTranslationLang = null }: MessageCardProps) {
+export function MessageCard({
+  message,
+  defaultTranslationLang = null,
+}: MessageCardProps) {
   const sender = message.from.name ?? message.from.email;
 
   return (

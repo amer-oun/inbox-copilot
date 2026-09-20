@@ -77,10 +77,7 @@ export function encrypt(plaintext: string): EncryptedValue {
 
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, keys.current.key, iv);
-  const ciphertext = Buffer.concat([
-    cipher.update(plaintext, "utf8"),
-    cipher.final(),
-  ]);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 
   return {
     ciphertext: ciphertext.toString("base64"),
@@ -106,10 +103,9 @@ export function decrypt(value: EncryptedValue): string {
   decipher.setAuthTag(authTag);
 
   try {
-    return Buffer.concat([
-      decipher.update(ciphertext),
-      decipher.final(),
-    ]).toString("utf8");
+    return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString(
+      "utf8",
+    );
   } catch {
     // GCM tag mismatch: the ciphertext, iv, tag, or key is wrong. The original
     // message is deliberately dropped — it tells an attacker nothing useful and

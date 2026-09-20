@@ -122,7 +122,11 @@ describe("recordThreatAppeal", () => {
   });
 
   it("refuses when the message has no assessment at all", async () => {
-    messageFindFirst.mockResolvedValue({ id: MESSAGE_ID, threadId: "t1", classification: null });
+    messageFindFirst.mockResolvedValue({
+      id: MESSAGE_ID,
+      threadId: "t1",
+      classification: null,
+    });
     await expect(
       recordThreatAppeal({ userId: USER_ID, messageId: MESSAGE_ID }),
     ).rejects.toThrow(/nothing to appeal/);
@@ -137,14 +141,12 @@ describe("recordThreatAppeal", () => {
   });
 
   it("replaces an existing appeal rather than duplicating it", async () => {
-    appealFindFirst
-      .mockResolvedValueOnce({ id: "appeal_1" })
-      .mockResolvedValueOnce({
-        createdAt: new Date("2026-09-15T10:00:00Z"),
-        note: "second thoughts",
-        claimedLevel: "SUSPICIOUS",
-        claimedScore: 57,
-      });
+    appealFindFirst.mockResolvedValueOnce({ id: "appeal_1" }).mockResolvedValueOnce({
+      createdAt: new Date("2026-09-15T10:00:00Z"),
+      note: "second thoughts",
+      claimedLevel: "SUSPICIOUS",
+      claimedScore: 57,
+    });
 
     const result = await recordThreatAppeal({
       userId: USER_ID,

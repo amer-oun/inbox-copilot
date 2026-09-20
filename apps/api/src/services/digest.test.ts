@@ -51,7 +51,9 @@ beforeEach(() => {
   reminderFindMany.mockReset().mockResolvedValue([reminderRow()]);
   reminderUpdateMany.mockReset().mockResolvedValue({ count: 1 });
   settingsFindFirst.mockReset().mockResolvedValue({ followUpDigest: true });
-  userFindFirst.mockReset().mockResolvedValue({ email: "owner@example.com", name: "Amer" });
+  userFindFirst
+    .mockReset()
+    .mockResolvedValue({ email: "owner@example.com", name: "Amer" });
   sendAppEmail.mockReset().mockResolvedValue({ sent: true, id: "re_1" });
 });
 

@@ -100,7 +100,10 @@ export async function createFollowUpReminder(
   const db = dbForUser(input.userId);
 
   const existing = await db.followUpReminder.findFirst({
-    where: { threadId: input.threadId, status: { in: ["PENDING", "TRIGGERED", "SNOOZED"] } },
+    where: {
+      threadId: input.threadId,
+      status: { in: ["PENDING", "TRIGGERED", "SNOOZED"] },
+    },
     select: { id: true, dueAt: true },
   });
 
@@ -319,7 +322,14 @@ export async function runFollowUpCheck(
     },
     orderBy: { dueAt: "asc" },
     take: CHECK_BATCH,
-    select: { id: true, userId: true, threadId: true, dueAt: true, status: true, createdAt: true },
+    select: {
+      id: true,
+      userId: true,
+      threadId: true,
+      dueAt: true,
+      status: true,
+      createdAt: true,
+    },
   });
 
   const result: FollowUpCheckResult = {

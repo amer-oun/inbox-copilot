@@ -169,7 +169,9 @@ function modelFor(request: StructuredRequest): GenerativeModel {
             description: request.tool.description,
             // JSON Schema reduced to Gemini's subset. Throws rather than silently
             // dropping anything structural (geminiSchema.ts).
-            parameters: toGeminiSchema(request.tool.parameters) as FunctionDeclarationSchema,
+            parameters: toGeminiSchema(
+              request.tool.parameters,
+            ) as FunctionDeclarationSchema,
           },
         ],
       },
@@ -225,7 +227,8 @@ export const geminiTransport: AiTransport = {
       .functionCalls()
       ?.find((candidateCall) => candidateCall.name === request.tool.name);
 
-    const usage = response.usageMetadata as unknown as Record<string, unknown> | undefined;
+    const usage = response.usageMetadata as unknown as
+      Record<string, unknown> | undefined;
 
     /*
      * A prompt the safety filters blocked outright has no candidates at all, and the
@@ -264,7 +267,11 @@ export const geminiTransport: AiTransport = {
         stopReason,
         // Kinds only, never their text.
         blocks: (candidate?.content?.parts ?? []).map((part) =>
-          part.functionCall !== undefined ? "functionCall" : part.text !== undefined ? "text" : "other",
+          part.functionCall !== undefined
+            ? "functionCall"
+            : part.text !== undefined
+              ? "text"
+              : "other",
         ),
       },
     };

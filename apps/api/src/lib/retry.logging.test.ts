@@ -163,18 +163,28 @@ describe("withRetry diagnostic logging", () => {
 
     const lines = sink.lines.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.every((line) => line.level === 40)).toBe(true);
-    const giveUp = lines.at(-1) as { providerError: { data: unknown }; retryable: boolean };
+    const giveUp = lines.at(-1) as {
+      providerError: { data: unknown };
+      retryable: boolean;
+    };
     expect(giveUp.retryable).toBe(true);
     expect(giveUp.providerError.data).toBeDefined();
   });
 
   it("logs the body for a non-retryable failure, which previously logged nothing", async () => {
     sink.lines.length = 0;
-    const error = new Error("Precondition check failed.") as Error & Record<string, unknown>;
+    const error = new Error("Precondition check failed.") as Error &
+      Record<string, unknown>;
     error.code = 400;
     error.response = {
       status: 400,
-      data: { error: { code: 400, message: "Precondition check failed.", errors: [{ reason: "failedPrecondition" }] } },
+      data: {
+        error: {
+          code: 400,
+          message: "Precondition check failed.",
+          errors: [{ reason: "failedPrecondition" }],
+        },
+      },
     };
 
     await expect(
