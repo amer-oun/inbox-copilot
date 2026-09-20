@@ -31,10 +31,37 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   REDIS_URL: z.string().min(1, "REDIS_URL is required"),
 
-  /** Where this API is reachable from a browser — builds the OAuth redirect_uri. */
+  /**
+   * Where this API is reachable from a browser — builds the OAuth `redirect_uri` and
+   * the Pub/Sub push endpoint.
+   *
+   * The localhost default is for development only and is **refused in production**
+   * (see `assertProductionConfig`): a deployed API whose `redirect_uri` says
+   * `http://localhost:4000` does not fail, it sends the user's browser to their own
+   * machine after Google has already issued the authorization code.
+   */
   API_PUBLIC_URL: z.url().default("http://localhost:4000"),
-  /** Where to send the browser after an OAuth callback. */
+  /** Where to send the browser after an OAuth callback. Same production rule. */
   WEB_APP_URL: z.url().default("http://localhost:3000"),
+
+  /**
+   * Host the BullMQ consumers inside this process instead of running `worker.js`
+   * separately.
+   *
+   * §1 wants them apart, and `pnpm dev` keeps them apart. This exists because "two
+   * processes" is a hosting budget rather than an architectural requirement: on a free
+   * tier there is one service, and one service that also drains its queues beats a
+   * queue nothing consumes. The consumers are the same code either way
+   * (`queueWorkers.ts`).
+   *
+   * Only `true`/`1` and `false`/`0` are accepted, and the parse fails on anything else
+   * rather than treating it as false — the failure mode of a silently-false flag is a
+   * deployment that accepts work, enqueues it, and never runs any of it.
+   */
+  WORKER_IN_PROCESS: z
+    .enum(["true", "false", "1", "0"])
+    .default("false")
+    .transform((value) => value === "true" || value === "1"),
 
   /**
    * AES-256-GCM key for the token vault. 32 bytes, base64. Validated here so a
@@ -168,6 +195,85 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/**
+ * Localhost defaults that are correct in development and wrong in a deployment.
+ *
+ * Every other variable in this file either has no default (so a missing value fails
+ * loudly) or has a default that stays correct everywhere. These two are the exception:
+ * they describe *where this deployment lives*, and their defaults are a guess that is
+ * right on a laptop and silently wrong in production.
+ *
+ * "Silently" is the whole problem. A deployed API that still believes it lives at
+ * `http://localhost:4000` builds that into the OAuth `redirect_uri` and into the
+ * Pub/Sub push endpoint; it starts, serves /health, and looks healthy, and the failure
+ * arrives much later as a mailbox that will not connect — or, worse, as a browser sent
+ * to the user's own machine carrying an authorization code. So it is a boot error.
+ */
+const PRODUCTION_URL_VARS = ["API_PUBLIC_URL", "WEB_APP_URL"] as const;
+
+function isLocalHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "0.0.0.0" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+/**
+ * In production, refuse a URL that points at this machine, refuse plain http, and
+ * refuse an AI endpoint that answers with canned data.
+ *
+ * `http` matters beyond eavesdropping: the session cookie is `Secure`, and the
+ * same-origin check on the BFF compares the browser's `Origin` against the app's own
+ * origin — a scheme mismatch between the two makes every write a 403, which is a
+ * confusing way to find out about a typo.
+ */
+function assertProductionConfig(loaded: Env): void {
+  if (loaded.NODE_ENV !== "production") return;
+
+  const problems: string[] = [];
+  for (const name of PRODUCTION_URL_VARS) {
+    const url = new URL(loaded[name]);
+    if (isLocalHostname(url.hostname)) {
+      problems.push(
+        `  - ${name}: points at ${url.hostname}, which no browser can reach in production`,
+      );
+    } else if (url.protocol !== "https:") {
+      problems.push(`  - ${name}: must be https in production`);
+    }
+  }
+
+  /*
+   * Canned AI answers, asked for on purpose, in production.
+   *
+   * `services/ai/endpoint.ts` already refuses this — but at the first AI call, which is
+   * the right place for a *missing* key (the API must boot and serve /health on a host
+   * with no AI configured) and the wrong place for this. `AI_PROVIDER=stub` is not an
+   * absent value, it is a stated intention, and the consequence is a database filling
+   * with fabricated classifications and SAFE threat verdicts. There is nothing to
+   * discover at runtime, so it fails here instead.
+   */
+  if (loaded.AI_PROVIDER === "stub") {
+    problems.push(
+      `  - AI_PROVIDER: "stub" returns canned answers and is refused in production`,
+    );
+  }
+  if (
+    loaded.ANTHROPIC_BASE_URL !== "" &&
+    isLocalHostname(new URL(loaded.ANTHROPIC_BASE_URL).hostname)
+  ) {
+    problems.push(
+      `  - ANTHROPIC_BASE_URL: points at this machine, so it is the dev stub rather than a gateway`,
+    );
+  }
+
+  if (problems.length > 0) {
+    throw new Error(["Invalid environment configuration:", ...problems].join("\n"));
+  }
+}
+
 function loadEnv(): Env {
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
@@ -178,6 +284,8 @@ function loadEnv(): Env {
       .join("\n");
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
+  // After the shape is known good, so this can read the resolved values.
+  assertProductionConfig(parsed.data);
   return parsed.data;
 }
 

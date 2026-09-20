@@ -326,6 +326,39 @@ in `classify.ts` clears **every** threat column including `threatIntent`,
 UNKNOWN while still naming the previous provider and carrying its explanation. Running the
 recompute for real is what surfaced it.
 
+## Deployment shape
+
+Full walkthrough in **docs/deployment.md**. Three things to know before changing any of it.
+
+**The queue consumers have one definition.** `src/queueWorkers.ts` builds and returns them;
+`src/worker.ts` (a dedicated process, what §1 asks for and what `pnpm dev` runs) and
+`src/index.ts` (when `WORKER_IN_PROCESS=true`, for a host that gives you one process) both
+call `startWorkers()`. Two copies of that wiring would drift, and the way they drift is the
+worst kind: a queue added to one and not the other is work that is enqueued, accepted by a
+producer, and silently never run. `queueWorkers.test.ts` reads the source and fails on the
+shape of that mistake — including a queue in `QUEUE_NAMES` with no consumer.
+
+`startWorkers` installs no signal handler, calls no `process.exit`, and closes neither
+Redis, the queue producers nor the database: in-process, the HTTP server is still using all
+three. Each entrypoint closes what it opened.
+
+**The production build runs from `dist`, never `tsx`.** `apps/api/tsconfig.build.json` is
+what `pnpm build` uses; `tsconfig.json` stays the editor and typecheck view and includes
+tests. The split exists because the one config shipped 65 compiled test files to
+production, which import vitest — a devDependency a deploy is entitled to prune.
+
+**Two localhost defaults are refused in production.** `API_PUBLIC_URL` and `WEB_APP_URL`
+(and `AUTH_URL`/`API_BASE_URL` on the web side) have defaults that are right on a laptop
+and *silently* wrong in a deployment: the first becomes the OAuth `redirect_uri`, so a
+deployed API that kept it sends the user's browser to their own machine carrying an
+authorization code, having looked healthy the whole way. `assertProductionConfig` makes
+that a boot error, along with `AI_PROVIDER=stub` and an `ANTHROPIC_BASE_URL` pointing at
+this machine — canned classifications in production are not something to discover later.
+
+A missing AI key is still a first-call failure rather than a boot failure, and that
+asymmetry is deliberate: the API must start and serve `/health` on a host with no AI
+configured. `stub` is not a missing value, it is a stated intention.
+
 ## Rendering email HTML
 
 Three independent layers, because each is assumed to fail:
@@ -835,4 +868,16 @@ them.
 > `.env.example` ships — was rejected by the env schema, so a fresh clone following the
 > documented setup could not boot the API. Fixed in `lib/env.ts` with `env.test.ts`, the
 > one test in this repo that parses a real `process.env`.
+> Also in this phase, deployment prep for Render (API) + Vercel (web), with nothing
+> committed: `WORKER_IN_PROCESS` and the `queueWorkers.ts` extraction, a build-only
+> tsconfig so `dist` is runnable and test-free, production config guards in both `env.ts`
+> files, `AUTH_URL` as a second accepted origin on the BFF's same-origin check (because a
+> proxy that reconstructs `http://` would 403 every write in production), optional
+> Microsoft sign-in, and **docs/deployment.md**.
+> Verified locally: `node apps/api/dist/index.js` serves /health green with all nine queues
+> consumed in-process, `node dist/worker.js` unchanged, the flag defaults to off, and each
+> production guard refuses to boot. Measured rather than assumed: after a six-minute gap in
+> the one-minute sweeper BullMQ ran **one** catch-up tick, not six — which is what makes a
+> sleeping free service late rather than lossy, and is written up honestly in the README.
+> Not verified: an actual Render or Vercel deploy.
 > Update this line as we progress.

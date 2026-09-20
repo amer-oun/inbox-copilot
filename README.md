@@ -194,6 +194,34 @@ that also does something. Until it does, `pnpm lint` deliberately does not check
 formatting — a lint task people learn to ignore is worse than no lint task. Markdown is
 left alone entirely, so hand-wrapped prose stays as its authors wrapped it.
 
+## Deploying
+
+Render for the API, Vercel for the web app, full walkthrough in
+**[docs/deployment.md](docs/deployment.md)** — both services' environment variables, the
+exact build and start commands for this pnpm/turbo monorepo, and the two Google OAuth
+clients with their redirect URIs.
+
+Two things from it that belong here rather than buried in a doc:
+
+**On a single service, `WORKER_IN_PROCESS=true` is not optional.** The API and the queue
+workers are separate processes by design (a 90-day backfill should not share an event loop
+with request handling), and `pnpm dev` still runs them separately. But a free tier gives
+you one process, so this flag hosts the same consumers — the same code, from
+`queueWorkers.ts` — inside the API. Without it, producing jobs still succeeds and nothing
+consumes them: a mailbox connects and never syncs, and nothing errors.
+
+**Scheduled send is late, not lost, on a service that sleeps.** A free Render service spins
+down after ~15 minutes idle, and with the workers inside it every timer stops. Measured
+rather than assumed: BullMQ runs **one** catch-up tick after downtime, not one per missed
+interval — a six-minute gap in a one-minute sweeper produced a single catch-up run. So a
+9am scheduled send goes out when somebody next opens the app. Nothing is lost, because the
+`ScheduledEmail` row is the source of truth and the sweeper re-enqueues from the row alone —
+but "sends at the time you chose" is not true on that plan. Real-time sync degrades the same
+way, to "syncs when you open the app". The fix, if you need those, is a separate Render
+background worker: it does not sleep on inbound traffic. The table in
+[docs/deployment.md](docs/deployment.md#what-degrades-on-a-sleeping-service) has every job
+and what happens to it.
+
 ## Security properties that are deliberate
 
 These are not incidental. Several of them cost something, and they are the reason the

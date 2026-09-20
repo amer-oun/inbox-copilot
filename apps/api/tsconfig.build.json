@@ -1,0 +1,14 @@
+{
+  "//": "Production emit. `tsconfig.json` is the editor/typecheck view and includes tests; this one is what `pnpm build` runs, so 65 compiled test files and their fixtures stay out of the deployed image. They would never be imported, but they do import vitest — a devDependency a deploy is entitled to prune — so shipping them means shipping files that cannot run. The dev-only AI stub goes too, for the same reason it is refused in production. A separate tsBuildInfoFile because two configs sharing one make an incremental build disagree with itself about which files it has seen.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    "src/**/__fixtures__/**",
+    "src/devtools/**"
+  ]
+}

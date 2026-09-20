@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../../../lib/apiClient";
+import { env } from "../../../../lib/env";
 import { auth } from "../../../../auth";
 
 /**
@@ -102,7 +103,34 @@ function assertSameOrigin(request: Request): boolean {
   // A same-origin `fetch` from the app always sends one; its absence means this did
   // not come from our page.
   if (origin === null) return false;
-  return origin === new URL(request.url).origin;
+  if (origin === new URL(request.url).origin) return true;
+  /*
+   * `AUTH_URL` as a second accepted origin, and *only* as a second one.
+   *
+   * Note what this is not: it does not read `x-forwarded-host`. Trusting a header to
+   * say what our own origin is would hand the check to whoever sends the request —
+   * `x-forwarded-host: evil.test` with `Origin: https://evil.test` would pass, and the
+   * thing behind this door sends mail from the user's address. `AUTH_URL` is
+   * configuration, and in production it is already required to be this deployment's
+   * canonical https origin (lib/env.ts).
+   *
+   * It is here because the first comparison depends on how the platform reconstructs
+   * `request.url` behind its proxy, and the failure mode if it reconstructs `http://`
+   * where the browser said `https://` is that *every write* becomes a 403 — sending,
+   * scheduling, drafting — with nothing in the log but "Cross-origin writes are
+   * refused". The request's own origin stays first so preview deployments, whose host
+   * is not AUTH_URL, keep working.
+   */
+  return origin === configuredOrigin();
+}
+
+/** The deployment's canonical origin, or null if it is not configured yet. */
+function configuredOrigin(): string | null {
+  try {
+    return new URL(env.AUTH_URL).origin;
+  } catch {
+    return null;
+  }
 }
 
 /** The target path on the core API, with only the parameters we allow. */

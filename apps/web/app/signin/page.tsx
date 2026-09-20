@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AlertTriangle, Mail } from "lucide-react";
-import { auth, signIn } from "../../auth";
+import { auth, microsoftSignInEnabled, signIn } from "../../auth";
 import { Button } from "../../components/ui/button";
 import {
   Card,
@@ -84,11 +84,17 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
               Continue with Google
             </Button>
           </form>
-          <form action={signInWith.bind(null, "microsoft-entra-id")}>
-            <Button type="submit" variant="outline" size="lg" block>
-              Continue with Microsoft
-            </Button>
-          </form>
+          {/*
+            Shown only when Microsoft is configured. A button for an unregistered
+            provider fails at login.microsoftonline.com, which looks like our bug.
+          */}
+          {microsoftSignInEnabled ? (
+            <form action={signInWith.bind(null, "microsoft-entra-id")}>
+              <Button type="submit" variant="outline" size="lg" block>
+                Continue with Microsoft
+              </Button>
+            </form>
+          ) : null}
         </CardContent>
       </Card>
 

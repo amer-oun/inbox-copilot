@@ -18,14 +18,29 @@ const envSchema = z.object({
 
   /** Auth.js session cookie signing/encryption secret. */
   AUTH_SECRET: z.string().min(32, "AUTH_SECRET must be >= 32 chars"),
-  /** Canonical origin of this app; Auth.js builds callback URLs from it. */
+  /**
+   * Canonical origin of this app; Auth.js builds callback URLs from it.
+   *
+   * The localhost default is development only and is refused in production — see
+   * `assertProductionUrls`. On Vercel it must be the deployment's own https origin,
+   * because it is what ends up in the `redirect_uri` sent to Google.
+   */
   AUTH_URL: z.url().default("http://localhost:3000"),
 
   /** Sign-in credentials. Scopes are set in auth.ts — no mail scopes here. */
   AUTH_GOOGLE_ID: z.string().min(1),
   AUTH_GOOGLE_SECRET: z.string().min(1),
-  AUTH_MICROSOFT_ENTRA_ID_ID: z.string().min(1),
-  AUTH_MICROSOFT_ENTRA_ID_SECRET: z.string().min(1),
+  /**
+   * Microsoft sign-in, which is **optional**: empty means the provider is not
+   * registered and the button is not shown (auth.ts, app/signin/page.tsx).
+   *
+   * Required once, which made deploying the app require an Entra application nobody
+   * was going to use — Outlook sync is not implemented, so Microsoft sign-in buys a
+   * second way to create an account and nothing else. Google is the required one
+   * because the only mailbox this app can read is Gmail.
+   */
+  AUTH_MICROSOFT_ENTRA_ID_ID: z.string().default(""),
+  AUTH_MICROSOFT_ENTRA_ID_SECRET: z.string().default(""),
   /** "common" for work + personal accounts; a tenant GUID to lock it down. */
   AUTH_MICROSOFT_ENTRA_ID_TENANT: z.string().min(1).default("common"),
 
@@ -38,6 +53,48 @@ const envSchema = z.object({
 });
 
 export type WebEnv = z.infer<typeof envSchema>;
+
+/**
+ * The two variables whose localhost defaults are right locally and silently wrong in a
+ * deployment: this app's own origin, and the core API's.
+ *
+ * Getting `API_BASE_URL` wrong on Vercel is the loud case — every page fails to fetch.
+ * `AUTH_URL` is the quiet one: Auth.js builds the OAuth `redirect_uri` from it, so a
+ * deployment that still says `http://localhost:3000` sends users to their own machine
+ * to finish signing in. Both are refused at the first read rather than left to be
+ * discovered.
+ */
+const PRODUCTION_URL_VARS = ["AUTH_URL", "API_BASE_URL"] as const;
+
+function isLocalHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname === "0.0.0.0" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+function assertProductionUrls(loaded: WebEnv): void {
+  if (loaded.NODE_ENV !== "production") return;
+
+  const problems: string[] = [];
+  for (const name of PRODUCTION_URL_VARS) {
+    const url = new URL(loaded[name]);
+    if (isLocalHostname(url.hostname)) {
+      problems.push(
+        `  - ${name}: points at ${url.hostname}, which no browser can reach in production`,
+      );
+    } else if (url.protocol !== "https:") {
+      problems.push(`  - ${name}: must be https in production`);
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new Error(["Invalid web environment configuration:", ...problems].join("\n"));
+  }
+}
 
 let cached: WebEnv | undefined;
 
@@ -57,6 +114,7 @@ function loadEnv(): WebEnv {
       .join("\n");
     throw new Error(`Invalid web environment configuration:\n${issues}`);
   }
+  assertProductionUrls(parsed.data);
   return parsed.data;
 }
 

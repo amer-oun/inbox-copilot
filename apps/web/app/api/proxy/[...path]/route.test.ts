@@ -24,6 +24,15 @@ class FakeApiError extends Error {
 vi.mock("../../../../lib/apiClient", () => ({ apiFetch, ApiError: FakeApiError }));
 vi.mock("../../../../auth", () => ({ auth }));
 
+/**
+ * The real module validates a deployment's worth of secrets on first read, which a unit
+ * test has no business supplying. Only `AUTH_URL` is read here — as the deployment's
+ * canonical origin, for the same-origin check.
+ */
+const webEnv = vi.hoisted(() => ({ AUTH_URL: "https://app.example.test" }));
+
+vi.mock("../../../../lib/env", () => ({ env: webEnv }));
+
 const { GET, POST } = await import("./route");
 
 const ORIGIN = "https://app.example.test";
@@ -278,5 +287,72 @@ describe("writes", () => {
     expect(await response.json()).toEqual({
       error: { code: "AI_CAP_EXCEEDED", message: "Daily AI call cap reached" },
     });
+  });
+});
+
+describe("the same-origin check across a proxy", () => {
+  /**
+   * The deployed shape: the browser talks to Vercel over https, and the platform
+   * reconstructs the request URL from its own forwarding headers. If that
+   * reconstruction disagrees with the browser about the scheme or the host, the first
+   * comparison in `assertSameOrigin` fails — and the consequence is that *every* write
+   * 403s in production while reads keep working, which looks like anything but a
+   * configuration problem.
+   */
+
+  function postTo(url: string, origin: string): Request {
+    return new Request(url, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ body: "ok" }),
+    });
+  }
+
+  it("accepts the configured origin when the reconstructed URL disagrees", async () => {
+    // The platform handed us http://internal-host/... ; the browser said https://app.
+    const response = await POST(
+      postTo(
+        `http://internal.vercel.internal/api/proxy/threads/${THREAD_ID}/reply`,
+        ORIGIN,
+      ),
+      params(`threads/${THREAD_ID}/reply`),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("still accepts a preview deployment, whose host is not AUTH_URL", async () => {
+    // Previews are the reason the request's own origin is checked first and kept.
+    const preview = "https://inbox-copilot-git-abc123.vercel.app";
+    const response = await POST(
+      postTo(`${preview}/api/proxy/threads/${THREAD_ID}/reply`, preview),
+      params(`threads/${THREAD_ID}/reply`),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("does not let a forwarded-host header decide what our origin is", async () => {
+    /*
+     * The reason this is `AUTH_URL` and not `x-forwarded-host`. Reading the host from a
+     * header hands the check to the sender, and what is behind it sends mail from the
+     * user's own address.
+     */
+    const response = await POST(
+      new Request(`${ORIGIN}/api/proxy/threads/${THREAD_ID}/reply`, {
+        method: "POST",
+        headers: {
+          origin: "https://evil.test",
+          "x-forwarded-host": "evil.test",
+          "x-forwarded-proto": "https",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ body: "ok" }),
+      }),
+      params(`threads/${THREAD_ID}/reply`),
+    );
+
+    expect(response.status).toBe(403);
+    expect(apiFetch).not.toHaveBeenCalled();
   });
 });

@@ -20,6 +20,17 @@ import { env } from "./lib/env";
 
 const LOGIN_SCOPES = "openid profile email";
 
+/**
+ * Microsoft sign-in is registered only when it is configured.
+ *
+ * Auth.js will happily register a provider with an empty client id, and the failure
+ * then happens at the provider's own consent screen — an error page from
+ * login.microsoftonline.com, which reads like our bug and is not. Leaving the provider
+ * out means the route does not exist and the button is not rendered.
+ */
+export const microsoftSignInEnabled =
+  env.AUTH_MICROSOFT_ENTRA_ID_ID !== "" && env.AUTH_MICROSOFT_ENTRA_ID_SECRET !== "";
+
 declare module "next-auth" {
   interface Session {
     user: { id: string } & DefaultSession["user"];
@@ -45,12 +56,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // want a long-lived Google token from the sign-in flow.
       authorization: { params: { scope: LOGIN_SCOPES } },
     }),
-    MicrosoftEntraID({
-      clientId: env.AUTH_MICROSOFT_ENTRA_ID_ID,
-      clientSecret: env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
-      issuer: `https://login.microsoftonline.com/${env.AUTH_MICROSOFT_ENTRA_ID_TENANT}/v2.0`,
-      authorization: { params: { scope: LOGIN_SCOPES } },
-    }),
+    ...(microsoftSignInEnabled
+      ? [
+          MicrosoftEntraID({
+            clientId: env.AUTH_MICROSOFT_ENTRA_ID_ID,
+            clientSecret: env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
+            issuer: `https://login.microsoftonline.com/${env.AUTH_MICROSOFT_ENTRA_ID_TENANT}/v2.0`,
+            authorization: { params: { scope: LOGIN_SCOPES } },
+          }),
+        ]
+      : []),
   ],
   callbacks: {
     /**
