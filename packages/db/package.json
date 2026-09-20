@@ -24,7 +24,8 @@
     "db:migrate": "dotenv -e ../../.env -- prisma migrate dev",
     "db:deploy": "dotenv -e ../../.env -- prisma migrate deploy",
     "db:studio": "dotenv -e ../../.env -- prisma studio",
-    "clean": "rimraf dist .turbo *.tsbuildinfo"
+    "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@prisma/client": "^6.16.2"
@@ -33,6 +34,7 @@
     "@inbox-copilot/config": "workspace:*",
     "@types/node": "^22.20.2",
     "dotenv-cli": "^11.0.0",
+    "eslint": "^10.11.0",
     "prisma": "^6.16.2",
     "rimraf": "^6.0.1",
     "typescript": "^7.0.2"

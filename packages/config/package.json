@@ -3,11 +3,42 @@
   "version": "0.1.0",
   "private": true,
   "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    "./eslint/base": "./eslint/base.js",
+    "./eslint/node": "./eslint/node.js",
+    "./eslint/next": "./eslint/next.js",
+    "./prettier": "./prettier.js",
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.node.json": "./tsconfig.node.json",
+    "./tsconfig.library.json": "./tsconfig.library.json"
+  },
   "files": [
+    "eslint",
+    "prettier.js",
     "tsconfig.base.json",
     "tsconfig.node.json",
     "tsconfig.library.json"
   ],
+  "scripts": {
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "@next/eslint-plugin-next": "^15.5.25",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0"
+  },
+  "devDependencies": {
+    "eslint": "^10.11.0"
+  },
+  "peerDependencies": {
+    "eslint": "^10.0.0",
+    "prettier": "^3.9.0"
+  },
   "publishConfig": {
     "access": "restricted"
   }

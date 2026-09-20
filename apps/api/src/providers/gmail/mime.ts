@@ -108,7 +108,6 @@ export function formatMimeAddress(address: MimeAddress): string {
 
 /** True when every character is printable US-ASCII, which is what headers allow raw. */
 function isAscii(value: string): boolean {
-  // eslint-disable-next-line no-control-regex
   return !/[^ -~]/.test(value);
 }
 

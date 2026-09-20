@@ -34,8 +34,9 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
           <p className="mt-1 text-sm text-muted">
-            Phase 1: your account exists and mailboxes can be connected. Mail sync
-            arrives in phase 2.
+            Connected mailboxes sync in the background. New mail is categorized,
+            summarized and checked for phishing as it arrives — and every reply stays a
+            draft until you send it.
           </p>
         </div>
         <form action={signOutAction}>
@@ -88,7 +89,7 @@ export default async function DashboardPage() {
           {accounts.length === 0 ? (
             <p className="flex items-center gap-2 text-sm text-muted">
               <Inbox aria-hidden className="size-4" />
-              Connect Gmail or Outlook to get started.
+              Connect a Gmail mailbox to get started.
             </p>
           ) : (
             <ul className="space-y-2">

@@ -70,7 +70,12 @@ a `-latest` alias: the ledger records which model answered, and an alias that ch
 under you makes every historical row a guess.
 
 ## Conventions
-- TypeScript strict. No `any`. No non-null `!` assertions outside tests.
+- TypeScript strict. No `any`. No non-null `!` assertions outside tests. `pnpm lint`
+  enforces both, plus rule 5 (`no-restricted-imports` on the provider SDKs) and
+  `no-console` — the shared flat configs are in `packages/config/eslint/`.
+- Prettier is configured (`packages/config/prettier.js`) but the repo is **not formatted
+  yet**: `pnpm format` rewrites about half the files, and that belongs in a commit of its
+  own. So `lint` does not check formatting, and `*.md` is ignored outright.
 - `apps/web` pins `typescript@^6` (Next 15 cannot use the TS 7 compiler API) and uses
   `next.config.mjs` plus relative imports for the same reason — no `@/*` alias there.
 - Errors: throw typed `AppError` subclasses from `lib/errors.ts`; the error middleware maps to HTTP.
@@ -86,6 +91,13 @@ The AI layer talks to a local stub unless you give it a key. `pnpm dev` starts i
 alongside the api and worker; the whole enrich path — prompts, tool definitions,
 schema validation, content-hash cache, usage ledger, `ai.enrich` queue — runs
 unchanged, and nothing leaves the machine.
+
+It starts **only when the stub is the provider `resolveAiEndpoint` actually picked**, so
+`pnpm dev` on Gemini or a real key runs api and worker alone. `startAiStub.ts` asks that
+function rather than re-reading the environment: it used to test `ANTHROPIC_API_KEY`
+itself, which was right until `AI_PROVIDER` existed and then stood a canned-response
+server next to every Gemini dev session. Two answers to "where do AI calls go" is how you
+stop being sure which one answered.
 
 ```bash
 pnpm dev                    # api + worker + ai stub (port AI_STUB_PORT, default 4010)
@@ -815,4 +827,12 @@ them.
 > as designed. That run also surfaced a real bug it made routine: `THREAT_PLACEHOLDER` did
 > not clear the three columns phase 9 added, so a re-classified row read UNKNOWN while still
 > naming the previous provider. Fixed and tested.
+> Also in this phase, three debts and a README: `pnpm lint` is real (ESLint flat configs
+> in `packages/config/eslint/`, Prettier configured but the reformat deliberately not
+> run — see "Conventions"); the AI stub now starts only when `resolveAiEndpoint` actually
+> picked it; and the phase-era UI copy is gone from the dashboard and the accounts page.
+> Writing the setup steps down found a real one: `AI_PROVIDER=""` — the literal line
+> `.env.example` ships — was rejected by the env schema, so a fresh clone following the
+> documented setup could not boot the API. Fixed in `lib/env.ts` with `env.test.ts`, the
+> one test in this repo that parses a real `process.env`.
 > Update this line as we progress.

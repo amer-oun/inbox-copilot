@@ -194,7 +194,7 @@ describe("classification", () => {
       ignoreCache: true,
     });
 
-    const { create, update } = classificationUpsert.mock.calls[0]?.[0];
+    const { create, update } = classificationUpsert.mock.calls[0]![0];
     for (const fields of [create, update]) {
       expect(fields.threatLevel).toBe("UNKNOWN");
       expect(fields.threatScore).toBe(0);

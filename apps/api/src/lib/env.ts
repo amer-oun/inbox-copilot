@@ -71,7 +71,21 @@ const envSchema = z.object({
    *   gemini     Google's Gemini API, on the free tier (GEMINI_API_KEY)
    *   stub       the local canned-response server. Refused in production.
    */
-  AI_PROVIDER: z.enum(["anthropic", "gemini", "stub"]).optional(),
+  AI_PROVIDER: z.preprocess(
+    /*
+     * Empty means unset. `.env.example` ships `AI_PROVIDER=""` — a commented-out
+     * variable is invisible, so the file names every knob and leaves it blank — and
+     * `--env-file` puts that empty string into `process.env`, where a bare `z.enum`
+     * rejects it. That turned a fresh clone following the documented setup into a
+     * startup crash reading `expected one of "anthropic"|"gemini"|"stub"`, which
+     * describes the rule and not the mistake.
+     *
+     * Every other optional variable in this file uses `.default("")` for the same
+     * reason; an enum is the one shape that cannot.
+     */
+    (value) => (value === "" ? undefined : value),
+    z.enum(["anthropic", "gemini", "stub"]).optional(),
+  ),
 
   /**
    * Anthropic API key for the AI layer. Empty is allowed at boot for the same

@@ -12,12 +12,15 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rimraf dist .turbo *.tsbuildinfo"
+    "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "lint": "eslint ."
   },
   "dependencies": {
     "zod": "^4.1.12"
@@ -25,6 +28,7 @@
   "devDependencies": {
     "@inbox-copilot/config": "workspace:*",
     "@types/node": "^22.20.2",
+    "eslint": "^10.11.0",
     "rimraf": "^6.0.1",
     "typescript": "^7.0.2"
   }

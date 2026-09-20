@@ -55,7 +55,15 @@
         "^build"
       ]
     },
-    "lint": {},
+    "lint": {
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "eslint.config.js",
+        "../../packages/config/eslint/**",
+        "../../packages/config/prettier.js"
+      ]
+    },
     "test": {
       "dependsOn": [
         "^build"

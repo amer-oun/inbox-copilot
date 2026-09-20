@@ -29,10 +29,15 @@
     "db:migrate": "pnpm --filter @inbox-copilot/db db:migrate",
     "db:deploy": "pnpm --filter @inbox-copilot/db db:deploy",
     "db:studio": "pnpm --filter @inbox-copilot/db db:studio",
-    "secrets:generate": "node scripts/generate-secrets.mjs"
+    "secrets:generate": "node scripts/generate-secrets.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@inbox-copilot/config": "workspace:*",
     "@types/node": "^22.20.2",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.8",
     "turbo": "^2.10.12",
     "typescript": "^7.0.2"
   }

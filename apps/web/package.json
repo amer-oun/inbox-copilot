@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rimraf .next .turbo *.tsbuildinfo"
+    "clean": "rimraf .next .turbo *.tsbuildinfo",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.10.0",
@@ -36,6 +37,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "dotenv-cli": "^11.0.0",
+    "eslint": "^10.11.0",
     "jsdom": "^30.0.1",
     "rimraf": "^6.0.1",
     "tailwindcss": "^4.1.14",

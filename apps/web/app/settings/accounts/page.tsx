@@ -119,7 +119,8 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
     mailAccountListSchema,
   );
 
-  // Phase 2 shows progress rather than mail: the inbox UI lands in phase 3.
+  // Sync state per mailbox, read alongside the accounts: this page answers "is it
+  // working", which the account row alone cannot say. The inbox itself is at /inbox.
   const syncStatuses = new Map<string, SyncStatusResponse>(
     await Promise.all(
       accounts.map(
@@ -161,7 +162,8 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
           className="mt-6 flex items-start gap-2 rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success"
         >
           <CheckCircle2 aria-hidden className="mt-0.5 size-4 shrink-0" />
-          Connected {connected}. Sync is queued and starts in phase 2.
+          Connected {connected}. The first sync is queued: it backfills the last 90
+          days, then keeps up in the background.
         </p>
       ) : null}
 
@@ -301,24 +303,30 @@ export default async function AccountsPage({ searchParams }: AccountsPageProps) 
         <CardHeader>
           <CardTitle>Connect a mailbox</CardTitle>
           <CardDescription>
-            Gmail asks for read/modify and send access. Outlook asks for
-            Mail.ReadWrite and Mail.Send. Both keep working offline so sync can run
-            while you are away.
+            Gmail asks for read/modify and send access, and keeps working offline so
+            sync can run while you are away. Outlook is not available yet.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-3">
+        <CardContent className="flex flex-wrap items-center gap-3">
           <form action={connectMailAccountAction}>
             <input type="hidden" name="provider" value="google" />
             <Button type="submit" variant="outline">
               Connect Gmail
             </Button>
           </form>
-          <form action={connectMailAccountAction}>
-            <input type="hidden" name="provider" value="microsoft" />
-            <Button type="submit" variant="outline">
-              Connect Outlook
-            </Button>
-          </form>
+          {/*
+           * Outlook has no sync implementation behind the provider port, so the OAuth
+           * flow would complete, store a grant, and then fail in the worker — leaving a
+           * connected mailbox that never brings mail in and an access grant the user has
+           * to go and revoke. Refusing at the button is the honest version of that.
+           * The badge sits beside it rather than in a tooltip: a disabled button is not
+           * focusable, so an explanation only it carries is one a keyboard user never
+           * hears.
+           */}
+          <Button type="button" variant="outline" disabled>
+            Connect Outlook
+          </Button>
+          <Badge tone="neutral">Coming soon</Badge>
         </CardContent>
       </Card>
     </main>

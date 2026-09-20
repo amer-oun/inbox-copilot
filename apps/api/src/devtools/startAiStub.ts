@@ -1,23 +1,43 @@
 import type { Server } from "node:http";
 import { logger } from "../lib/logger.js";
-import { env } from "../lib/env.js";
+import { resolveAiEndpoint, type AiEndpoint } from "../services/ai/endpoint.js";
 import { AiStubPortInUseError, startAiStub } from "./aiStub.js";
 
 /**
  * Entrypoint for the development AI stub: `pnpm --filter @inbox-copilot/api ai:stub`
  * (and part of `pnpm dev`).
  *
- * It exits immediately when a real key is configured without a base URL pointing
- * here — running a canned-response server next to a real one is how you end up
- * unsure which answered.
+ * It starts **only when the stub is the endpoint the AI layer has actually resolved**,
+ * and asks `resolveAiEndpoint` rather than re-deriving that from the environment. One
+ * rule in one place: an earlier version here read `ANTHROPIC_API_KEY` directly, which
+ * was right until `AI_PROVIDER` existed and then kept starting a canned-response server
+ * next to every `pnpm dev` running on Gemini. Two answers to "where do AI calls go" is
+ * how you end up unsure which one answered.
+ *
+ * A resolution that *throws* — `AI_PROVIDER=gemini` with no key, production with nothing
+ * configured — is also not a reason to start: the stub is never the fix for a
+ * misconfigured provider, and standing one up would turn a loud failure into canned
+ * answers in a database.
  */
 
-const stubUrl = `http://127.0.0.1:${env.AI_STUB_PORT}`;
+function resolveOrExit(): AiEndpoint {
+  try {
+    return resolveAiEndpoint();
+  } catch (error) {
+    logger.info(
+      { reason: error instanceof Error ? error.message : String(error) },
+      "ai stub not started: the AI provider is not configured",
+    );
+    process.exit(0);
+  }
+}
 
-if (env.ANTHROPIC_API_KEY !== "" && env.ANTHROPIC_BASE_URL !== stubUrl) {
+const endpoint = resolveOrExit();
+
+if (!endpoint.stubbed) {
   logger.info(
-    { baseURL: env.ANTHROPIC_BASE_URL || "https://api.anthropic.com" },
-    "ai stub not started: a real ANTHROPIC_API_KEY is configured",
+    { provider: endpoint.provider, reason: endpoint.reason },
+    "ai stub not started: AI calls go to a real provider",
   );
   process.exit(0);
 }
