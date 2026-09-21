@@ -347,6 +347,28 @@ what `pnpm build` uses; `tsconfig.json` stays the editor and typecheck view and 
 tests. The split exists because the one config shipped 65 compiled test files to
 production, which import vitest — a devDependency a deploy is entitled to prune.
 
+**The Prisma client is generated to an explicit path**, `packages/db/generated/client`, and
+`packages/db` imports it by relative path — never from `@prisma/client`. Two reasons, both
+of which cost a production outage to find:
+
+- the default output is a content-hashed pnpm directory
+  (`node_modules/.pnpm/@prisma+client@…_prism_f06fed13…/node_modules/.prisma/client`), which
+  no config file can name — and Next.js only ships the files it traces, so the web app's
+  serverless function went out with no engine in it and threw
+  `PrismaClientInitializationError: Prisma Client could not locate the Query Engine`;
+- `@prisma/client` is peer-resolved and this workspace resolves it **twice**, split by
+  TypeScript version (`apps/web` pins TS 6 for Next 15, everything else is TS 7). Generate
+  wrote into one instance; the web app's graph reached the other, which had no client and no
+  engine. A relative import has one answer.
+
+Four settings hold it up and all four are load-bearing: `output` and
+`binaryTargets = ["native", "rhel-openssl-3.0.x"]` in the schema,
+`outputFileTracingIncludes` in `apps/web/next.config.mjs`, and `generated/**` in turbo's
+build outputs — without that last one a cache *hit* restores `dist/` and omits the client,
+so the deploy that breaks is the second one. `pnpm verify:trace` checks the real outcome
+against a build; `apps/web/lib/prismaDeploy.test.ts` guards the settings in the fast suite.
+Measured: 1 traced file from `packages/db` before, 41 after.
+
 **Two localhost defaults are refused in production.** `API_PUBLIC_URL` and `WEB_APP_URL`
 (and `AUTH_URL`/`API_BASE_URL` on the web side) have defaults that are right on a laptop
 and *silently* wrong in a deployment: the first becomes the OAuth `redirect_uri`, so a
@@ -879,5 +901,15 @@ them.
 > production guard refuses to boot. Measured rather than assumed: after a six-minute gap in
 > the one-minute sweeper BullMQ ran **one** catch-up tick, not six — which is what makes a
 > sleeping free service late rather than lossy, and is written up honestly in the README.
+> Then, from a real Vercel failure: the Prisma Query Engine fix above — explicit generator
+> `output`, `binaryTargets`, `outputFileTracingIncludes`, `generated/**` in turbo outputs,
+> `scripts/verify-prisma-trace.mjs`, and the walkthrough in docs/deployment.md.
+> Verified by reading the trace manifests `next build` writes: before, 718 traced files with
+> exactly one from `packages/db` and no Prisma at all; after, 41 from `packages/db` including
+> `libquery_engine-rhel-openssl-3.0.x.so.node` and the `runtime/` directory. Removing
+> `outputFileTracingIncludes` drops it back to 5 and the verifier fails, which is also how
+> the two distinct failure modes were separated (engine traced but client JS not → `Cannot
+> find module`; neither → the engine error). The compiled API still serves /health green, so
+> moving the client did not disturb the Render path.
 > Not verified: an actual Render or Vercel deploy.
 > Update this line as we progress.

@@ -1,4 +1,11 @@
-import { PrismaClient } from "@prisma/client";
+/*
+ * The generated client, from the explicit `output` in prisma/schema.prisma rather than
+ * from `@prisma/client`. `@prisma/client` only re-exports a client generated into the
+ * default `node_modules/.prisma/client`, which is the content-hashed pnpm path Next.js
+ * could not trace onto a Vercel function. This package is the only importer either way —
+ * everything else in the repo imports from `@inbox-copilot/db` — so the change stops here.
+ */
+import { PrismaClient } from "../generated/client/index.js";
 import { tenancyExtension } from "./tenancy.js";
 
 /**

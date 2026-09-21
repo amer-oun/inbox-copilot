@@ -113,6 +113,7 @@ pnpm format      # prettier --write .   (read "Formatting" below first)
 pnpm build
 pnpm db:migrate  # prisma migrate dev — always a migration, never `db push`
 pnpm ai:sweep    # enqueue anything that was never enriched
+pnpm verify:trace # after a build: is Prisma's engine in the web app's Vercel bundle?
 ```
 
 ### Google OAuth credentials
@@ -201,7 +202,7 @@ Render for the API, Vercel for the web app, full walkthrough in
 exact build and start commands for this pnpm/turbo monorepo, and the two Google OAuth
 clients with their redirect URIs.
 
-Two things from it that belong here rather than buried in a doc:
+Three things from it that belong here rather than buried in a doc:
 
 **On a single service, `WORKER_IN_PROCESS=true` is not optional.** The API and the queue
 workers are separate processes by design (a 90-day backfill should not share an event loop
@@ -209,6 +210,15 @@ with request handling), and `pnpm dev` still runs them separately. But a free ti
 you one process, so this flag hosts the same consumers — the same code, from
 `queueWorkers.ts` — inside the API. Without it, producing jobs still succeeds and nothing
 consumes them: a mailbox connects and never syncs, and nothing errors.
+
+**The web app needs four settings to find Prisma on Vercel.** Auth.js talks to Postgres
+through the Prisma adapter, and Vercel ships only the files Next.js *traces* into each
+serverless function — which, measured on this repo, was 718 files containing no Prisma at all,
+because the default generator output is a content-hashed pnpm path nothing can name. The fix
+is an explicit generator `output`, `binaryTargets` including Vercel's runtime,
+`outputFileTracingIncludes` in `next.config.mjs`, and `generated/**` in turbo's build outputs.
+`pnpm verify:trace` checks it against a real build. Details and the full reasoning are in
+[docs/deployment.md](docs/deployment.md#prisma-on-vercel-the-query-engine-error).
 
 **Scheduled send is late, not lost, on a service that sleeps.** A free Render service spins
 down after ~15 minutes idle, and with the workers inside it every timer stops. Measured

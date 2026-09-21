@@ -5,6 +5,10 @@ splits naturally into Render for the first and Vercel for the second, and that s
 also where most of the configuration mistakes live, because the two halves have to agree
 about three things: the internal JWT keypair, the database, and each other's URLs.
 
+If you are here because the web app is throwing
+`PrismaClientInitializationError: Prisma Client could not locate the Query Engine`, go
+straight to [Prisma on Vercel](#prisma-on-vercel-the-query-engine-error).
+
 Everything below assumes the free tiers. Read
 [**What degrades on a sleeping service**](#what-degrades-on-a-sleeping-service) before you
 rely on scheduled send — it is not a footnote.
@@ -151,6 +155,18 @@ The `cd ../..` is there for the same reason as the filter on Render: `apps/web` 
 `@inbox-copilot/db` and `@inbox-copilot/shared` from their compiled output, and running
 `next build` alone would not build them.
 
+Two Vercel project settings beyond those four:
+
+- **"Include source files outside of the Root Directory"** must be **on**. Without it the
+  build command's `cd ../..` has nothing to find. (If your build is succeeding, it is
+  already on.)
+- **"Skip deployments when there are no changes to the Root Directory"** should be **off**,
+  or a change confined to `packages/db` will not redeploy the web app that depends on it.
+
+**Root directory stays `apps/web`** — see
+[the Prisma section](#prisma-on-vercel-the-query-engine-error) for why moving it to the
+repo root is not the fix for the engine error, even though it looks like it should be.
+
 ### Environment variables (Vercel)
 
 | Variable | Value | Why |
@@ -177,6 +193,84 @@ Two things worth knowing about this database connection:
   reach for a bigger plan.
 - **It needs TLS.** Append `?sslmode=require` (alongside the connection limit:
   `?connection_limit=1&sslmode=require`) if Render's external string does not already say so.
+
+### Prisma on Vercel: the Query Engine error
+
+The web app needs Prisma at runtime — Auth.js stores users and sessions through the Prisma
+adapter — and this is the one part of deploying it that does not work out of the box. The
+symptom is a clean build, a working `next start` locally, and then, on the first request in
+production:
+
+```
+PrismaClientInitializationError: Prisma Client could not locate the Query Engine
+```
+
+**Nothing is wrong with the database connection when you see this.** The function is missing
+files. Four settings in this repo fix it, all of them already committed; this section is here
+so that if one is ever removed, the next person knows what they are looking at.
+
+**What Vercel deploys is not your `node_modules`.** Next.js traces the files each route
+actually needs and Vercel copies *those* into the serverless function. Measured on this repo
+before the fix: 718 traced files for the web app, of which exactly **one** came from
+`packages/db` — its `package.json` — and **none** were Prisma. The engine was never in the
+function, so it could not be located.
+
+Two separate reasons it was missing, which is why one fix alone was not enough:
+
+1. **The client was generated into a path nothing could name.** The default output is
+   `node_modules/.prisma/client`, which under pnpm means a content-hashed directory like
+   `node_modules/.pnpm/@prisma+client@6.19.3_prism_f06fed13…/node_modules/.prisma/client`.
+   You cannot write that in a config file, and it changes when a peer dependency changes.
+
+   Worse, under pnpm there can be more than one. This workspace resolves `@prisma/client`
+   **twice**, peer-split by TypeScript version — `apps/web` pins TypeScript 6 because Next 15
+   cannot use the TS 7 compiler API, everything else is on 7 — and `prisma generate` writes
+   into one of them. The instance the web app's own dependency graph reaches (via
+   `@auth/prisma-adapter`) was the other one: no generated client in it and no engine at all.
+   That is why this broke on the web app and not on the API.
+
+2. **`serverExternalPackages` stops Next walking the package.** Keeping `@prisma/client` and
+   `@inbox-copilot/db` external is correct — a native `.node` binary must not be bundled, and
+   bundling would rewrite the relative path Prisma's engine lookup depends on. But an
+   external package that nothing traced is a package that is simply absent from the function.
+
+So, the four settings:
+
+| Where | Setting | What it does |
+|---|---|---|
+| `packages/db/prisma/schema.prisma` | `output = "../generated/client"` | Generates into `packages/db/generated/client` — an ordinary directory in an ordinary package, at a path a config file can name. Also collapses the two pnpm instances into one client that `packages/db` imports by **relative path**, so peer resolution cannot pick the wrong copy. |
+| same | `binaryTargets = ["native", "rhel-openssl-3.0.x"]` | `rhel-openssl-3.0.x` is Vercel's Node runtime; `native` keeps a laptop working. Vercel's build image and runtime usually match, and "usually" is not a thing to deploy on. |
+| `apps/web/next.config.mjs` | `outputFileTracingIncludes` | Names `packages/db/dist/**` and `packages/db/generated/client/**` so both are copied into every function. |
+| `turbo.json` | `generated/**` in `tasks.build.outputs` | **The subtle one.** `packages/db`'s build is `prisma generate && tsc`. Without this, a turbo cache *hit* restores `dist/` and silently omits the generated client — so the deploy that breaks is the second one, with no change to explain it. |
+
+`prisma generate` itself already runs on Vercel: it is the first half of `packages/db`'s build
+script, and the build command's `--filter` builds that package first. It was never the missing
+piece.
+
+**Root directory is not the fix.** Moving Vercel's root directory to the repo root looks like
+it should help — the engine lives at the repo root, after all — but the tracing root was
+already the workspace root (686 of those 718 files came from `node_modules/.pnpm`). The
+problem was never *where* tracing started; it was that these particular files were excluded
+from it. Root directory stays `apps/web`, which is also what lets Vercel detect Next.js, and
+`outputFileTracingRoot` in `next.config.mjs` now states the tracing root explicitly so it no
+longer depends on which directory the build was invoked from.
+
+**Checking it, without deploying.** After a build:
+
+```bash
+pnpm verify:trace
+```
+
+That reads the `.nft.json` manifests `next build` writes and asserts the client, the
+`runtime/` directory and the Linux engine are all in them. It is worth running after
+upgrading Next or Prisma, and after touching `serverExternalPackages` or
+`outputFileTracingIncludes`. The two failure modes it distinguishes:
+
+- engine present, client JS missing → `Cannot find module` at runtime;
+- both missing → the `could not locate the Query Engine` error above.
+
+`apps/web/lib/prismaDeploy.test.ts` guards the same four settings in the fast test suite, so
+deleting one fails `pnpm test` rather than a deploy.
 
 ## 4. Google Cloud OAuth clients
 
@@ -229,7 +323,9 @@ Three things that catch people here:
    `api listening` with `workerInProcess: false` and nothing else, `WORKER_IN_PROCESS` is
    not set and the app will look fine for about a minute.
 3. Deploy the web app. Sign in with Google. A failure here is almost always `AUTH_URL`,
-   the login client's redirect URI, or a missing `DATABASE_URL`.
+   the login client's redirect URI, or a missing `DATABASE_URL` — and if it is
+   `PrismaClientInitializationError`, it is
+   [the Query Engine section](#prisma-on-vercel-the-query-engine-error), not your database.
 4. **Settings → Connected mailboxes → Connect Gmail.** A failure here is almost always
    `API_PUBLIC_URL` or the mailbox client's redirect URI.
 5. Watch the backfill progress on that page. Then open a thread: a summary and a category

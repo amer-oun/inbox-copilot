@@ -6,7 +6,7 @@ export {
   type TenantDb,
 } from "./client.js";
 export { tenancyExtension } from "./tenancy.js";
-export { Prisma, type PrismaClient } from "@prisma/client";
+export { Prisma, type PrismaClient } from "../generated/client/index.js";
 export type {
   User,
   Account,
@@ -24,4 +24,4 @@ export type {
   UserSettings,
   ScheduledEmail,
   FollowUpReminder,
-} from "@prisma/client";
+} from "../generated/client/index.js";

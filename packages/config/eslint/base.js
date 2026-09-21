@@ -19,6 +19,10 @@ import prettier from "eslint-config-prettier/flat";
 /** Build output and generated clients. Nothing here was written by a person. */
 export const ignores = [
   "**/dist/**",
+  // The Prisma client, generated to an explicit path so Next.js can trace it onto a
+  // serverless function (packages/db/prisma/schema.prisma). Machine-written, and it
+  // ships a 17MB engine binary alongside.
+  "**/generated/client/**",
   "**/.next/**",
   "**/.turbo/**",
   "**/node_modules/**",

@@ -31,7 +31,8 @@
     "db:studio": "pnpm --filter @inbox-copilot/db db:studio",
     "secrets:generate": "node scripts/generate-secrets.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "verify:trace": "node scripts/verify-prisma-trace.mjs"
   },
   "devDependencies": {
     "@inbox-copilot/config": "workspace:*",

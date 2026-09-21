@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../generated/client/index.js";
 
 /**
  * Rule 4: every query filters by userId. This extension enforces it mechanically

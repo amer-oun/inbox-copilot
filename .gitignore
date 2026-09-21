@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# The Prisma client, generated to an explicit path by `prisma generate`
+# (see packages/db/prisma/schema.prisma). A build artefact, engines and all.
+packages/db/generated/
 .next/
 .turbo/
 coverage/
