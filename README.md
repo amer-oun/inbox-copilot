@@ -13,11 +13,61 @@ person presses send.
 Full design rationale is in **[ARCHITECTURE.md](ARCHITECTURE.md)**; the working rules
 contributors are held to are in **[CLAUDE.md](CLAUDE.md)**.
 
+**[Live demo →](https://inbox-copilot-wheat.vercel.app)** — the web app on Vercel with
+the API on Render. You will get as far as the sign-in screen and no further: the Google
+OAuth client is in *testing* mode, so only addresses added to it as test users can sign
+in, and everyone else is turned away by Google with `access_denied`. That is Google's
+gate, not ours, and it is deliberate — the app requests `gmail.modify`, which is a
+restricted scope that cannot be offered to the public without a security assessment.
+Ask for your address to be added, or run it locally with your own OAuth client (see
+[Running it](#running-it)). Two more things worth knowing before you click: the API
+sleeps after 15 minutes idle on Render's free tier, so the first request after a quiet
+spell takes about a minute, and nothing in the demo has a mailbox connected until you
+connect one of your own.
+
 > **Outlook is not implemented.** You can sign _in_ with a Microsoft account and the
 > provider port has a place for it, but `mailProviderFor("OUTLOOK")` throws: there is no
 > Graph sync, no delta cursor, no subscription. Gmail is the only mailbox that works end
 > to end, and the Connect Outlook button is disabled rather than starting a flow that
 > would take a grant and then fail.
+
+## Screenshots
+
+_Demo data. Every name, address, company and message below is invented — see
+[Running it](#running-it) for what it looks like against a real mailbox._
+
+![The inbox: a priority-sorted thread list with category tabs, unread markers, urgent
+and high-priority chips, and one-line AI summaries under each
+subject.](docs/screenshots/inbox.png)
+
+**The inbox.** Sorted by priority rather than by date, with the model's one-line summary
+under each subject where there is one. Only Urgent and High are marked — a signal on
+every row is not a signal. The shield on the second row is the threat verdict.
+
+![A thread: the AI summary card with key points and suggested actions, the sender's
+message rendered on white inside the dark-capable app, and the reply composer showing
+three generated drafts with one loaded into the editor.](docs/screenshots/thread-reply-drafts.png)
+
+**A thread, and a reply being drafted.** The summary, its key points and the suggested
+actions are labelled as generated and name the model. The composer offers three drafts
+that differ in substance; picking one loads it into an editor you have to read. Nothing
+here sends — `Send reply` asks again and names the recipient.
+
+![The phishing banner: a red panel headed "This message appears to be a phishing
+attempt", listing a DMARC failure, a lookalike domain, a link whose text disagrees with
+its target, and a first-time sender, with the model's explanation and a "This is safe"
+appeal button.](docs/screenshots/phishing-banner.png)
+
+**The phishing banner.** The reasons are the product, not the score. The deterministic
+checks run first and set a floor the model cannot lower; `This is safe` records an
+appeal and deliberately changes no verdict.
+
+<img src="docs/screenshots/inbox-mobile-dark.png" width="390"
+  alt="The same inbox at phone width in the dark theme, with a bottom navigation bar.">
+
+**Phone width, dark theme.** The sidebar becomes a bottom bar. Themes follow the device
+setting unless you override them, and email bodies stay on white in both — senders write
+their HTML for a white page.
 
 ## Features
 

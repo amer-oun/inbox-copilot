@@ -867,6 +867,16 @@ everywhere, distinguishing nothing.
 > `next build` listing the twelve expected routes, Prettier clean, and both pages
 > screenshotted in both themes at 1280px and at 390×844 through a headless-Chrome
 > harness that renders the real components with fixture DTOs. Every text/background pair
+> Also in this pass: **docs/screenshots/** and a Screenshots section at the top of the
+> README, plus the live demo link and why a visitor cannot sign in (the Google client is
+> in testing mode, so `gmail.modify` is limited to listed test users). The images come
+> from the same harness, extended to *hydrate* the page so the reply composer could be
+> clicked and screenshotted with real drafts in it rather than mocked. All demo data is
+> invented in `fixtures-readme.ts`; nothing came from a real mailbox. Two things that
+> bit: DTO ids must be CUID-shaped or the composer's response parse fails and renders an
+> error, and the app formats dates with the *reader's* locale, so the render machine's
+> French default put "21 sept." and "dim." into the images until the harness pinned
+> en-GB on both the Node and browser sides.
 > in both palettes was computed against WCAG AA (58 pairs, all ≥ 4.5:1, indicators
 > ≥ 3:1) rather than eyeballed. Found while doing it: the previous dark theme had never
 > been conditional — `@theme` nested in a media query is hoisted, so every user had been
