@@ -3,6 +3,9 @@ dist/
 # The Prisma client, generated to an explicit path by `prisma generate`
 # (see packages/db/prisma/schema.prisma). A build artefact, engines and all.
 packages/db/generated/
+# The engine + schema copied into the web app so Prisma finds them at runtime on Vercel
+# (scripts/copy-prisma-engine.mjs, run by apps/web's build).
+apps/web/generated/
 .next/
 .turbo/
 coverage/

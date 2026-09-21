@@ -113,7 +113,7 @@ pnpm format      # prettier --write .   (read "Formatting" below first)
 pnpm build
 pnpm db:migrate  # prisma migrate dev — always a migration, never `db push`
 pnpm ai:sweep    # enqueue anything that was never enriched
-pnpm verify:trace # after a build: is Prisma's engine in the web app's Vercel bundle?
+pnpm verify:prisma # after a build: will the web app find Prisma's engine on Vercel?
 ```
 
 ### Google OAuth credentials
@@ -211,13 +211,15 @@ you one process, so this flag hosts the same consumers — the same code, from
 `queueWorkers.ts` — inside the API. Without it, producing jobs still succeeds and nothing
 consumes them: a mailbox connects and never syncs, and nothing errors.
 
-**The web app needs four settings to find Prisma on Vercel.** Auth.js talks to Postgres
-through the Prisma adapter, and Vercel ships only the files Next.js *traces* into each
-serverless function — which, measured on this repo, was 718 files containing no Prisma at all,
-because the default generator output is a content-hashed pnpm path nothing can name. The fix
-is an explicit generator `output`, `binaryTargets` including Vercel's runtime,
-`outputFileTracingIncludes` in `next.config.mjs`, and `generated/**` in turbo's build outputs.
-`pnpm verify:trace` checks it against a real build. Details and the full reasoning are in
+**Prisma's engine has to be copied into `apps/web`, not just deployed.** Auth.js talks to
+Postgres through the Prisma adapter, and getting that working on Vercel is the one part of
+deploying this that does not come for free. Next bundles the generated client, and a bundled
+client looks for its engine under `process.cwd()` — which in a function is the project
+directory — so the engine `prisma generate` wrote into `packages/db` can be shipped perfectly
+and never be looked at. `scripts/copy-prisma-engine.mjs` runs before `next build` and puts the
+schema and engine at `apps/web/generated/client`; `pnpm verify:prisma` checks it against a real
+build. The full reasoning, including Prisma's own resolution code and how to reproduce the
+failure locally, is in
 [docs/deployment.md](docs/deployment.md#prisma-on-vercel-the-query-engine-error).
 
 **Scheduled send is late, not lost, on a service that sleeps.** A free Render service spins

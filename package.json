@@ -32,7 +32,7 @@
     "secrets:generate": "node scripts/generate-secrets.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "verify:trace": "node scripts/verify-prisma-trace.mjs"
+    "verify:prisma": "node scripts/verify-prisma-deploy.mjs"
   },
   "devDependencies": {
     "@inbox-copilot/config": "workspace:*",

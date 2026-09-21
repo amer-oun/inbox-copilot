@@ -29,28 +29,42 @@ const nextConfig = {
   outputFileTracingRoot: repoRoot,
 
   /*
-   * The Prisma client, named explicitly.
+   * The Prisma client, named explicitly, in two places — and the *first* entry is the one
+   * that matters. Being in the trace is not the same as being where Prisma looks.
    *
-   * `serverExternalPackages` above means Next does not bundle `@inbox-copilot/db`, so it
-   * also does not walk it — and an external package that nothing traced is a package that
-   * is simply absent from the deployed function. Measured on this repo: before this, the
-   * web app's 718 traced files included exactly one file from `packages/db` (its
-   * `package.json`) and nothing at all from Prisma, which is the whole of
-   * `PrismaClientInitializationError: Prisma Client could not locate the Query Engine`.
+   * `generated/client/**` is a copy made by `scripts/copy-prisma-engine.mjs`, which the
+   * `build` script runs before `next build`. It is project-relative, so the function gets
+   * it at `<task root>/apps/web/generated/client` — and that is exactly the directory
+   * Prisma's generated client falls back to when it has been bundled:
    *
-   * Both entries are needed and they fail differently:
-   *   - `generated/client/**` is the client and the engine binary. Prisma's own tracing
-   *     hook finds the `.so.node` once it lives at a nameable path, but not the
-   *     `runtime/` directory its `index.js` requires.
-   *   - `dist/**` is `packages/db` itself — the tenancy extension, the shared
-   *     `PrismaClient` instance. Without it the import resolves to nothing.
+   *     config.dirname = __dirname
+   *     if (!fs.existsSync(path.join(__dirname, 'schema.prisma'))) {
+   *       // "generated/client", then "client", under process.cwd()
+   *     }
    *
-   * `/**\/*` rather than a list of routes: Auth.js reaches the database from any page
-   * that reads a session, which is every authenticated page, and a list would be a
-   * second place to remember.
+   * Next *does* bundle it — `serverExternalPackages` matches package specifiers, and
+   * `packages/db` reaches its client by relative path — so `__dirname` becomes a build-time
+   * string literal and that branch always fires in a deployed function. An earlier version
+   * of this config traced the engine into `packages/db/generated/client` and the deploy
+   * still failed: the file was there, and Prisma looked under `apps/web` and at the dead
+   * build path `/vercel/path0/packages/db/generated/client`. See docs/deployment.md.
+   *
+   * The `../../packages/db/**` entries stay as the other half of the pair, for the case
+   * where the client is *not* bundled — then `__dirname` is real, `schema.prisma` sits
+   * beside it, and the first branch wins. One duplicated engine is a cheap price for both
+   * resolutions working; a production outage diagnosed from a list of searched paths is
+   * not.
+   *
+   * `/**\/*` rather than a list of routes: Auth.js reaches the database from any page that
+   * reads a session, which is every authenticated page, and a list would be a second place
+   * to remember.
    */
   outputFileTracingIncludes: {
-    "/**/*": ["../../packages/db/dist/**", "../../packages/db/generated/client/**"],
+    "/**/*": [
+      "generated/client/**",
+      "../../packages/db/dist/**",
+      "../../packages/db/generated/client/**",
+    ],
   },
 };
 

@@ -361,13 +361,33 @@ of which cost a production outage to find:
   wrote into one instance; the web app's graph reached the other, which had no client and no
   engine. A relative import has one answer.
 
-Four settings hold it up and all four are load-bearing: `output` and
-`binaryTargets = ["native", "rhel-openssl-3.0.x"]` in the schema,
-`outputFileTracingIncludes` in `apps/web/next.config.mjs`, and `generated/**` in turbo's
-build outputs — without that last one a cache *hit* restores `dist/` and omits the client,
-so the deploy that breaks is the second one. `pnpm verify:trace` checks the real outcome
-against a build; `apps/web/lib/prismaDeploy.test.ts` guards the settings in the fast suite.
-Measured: 1 traced file from `packages/db` before, 41 after.
+**And the engine must be *copied into `apps/web`*, not merely deployed.** This is the part
+that cost a second failed deploy. Next bundles the generated client — `serverExternalPackages`
+matches package specifiers and `packages/db` reaches its client by relative path — so
+`__dirname` becomes a build-time string and the generated client's own fallback fires:
+
+```js
+config.dirname = __dirname
+if (!fs.existsSync(path.join(__dirname, 'schema.prisma'))) {
+  // "generated/client", then "client", under process.cwd()
+}
+```
+
+`process.cwd()` in a Vercel function is the project directory, so Prisma looks in
+`/var/task/apps/web/generated/client` and at the dead build path
+`/vercel/path0/packages/db/generated/client`. The engine sitting at
+`/var/task/packages/db/generated/client` is shipped and never consulted. Tracing it there is
+therefore necessary and not sufficient — **"deployed" and "findable" are different
+properties**, and a checker that only proves the first will pass while production is down.
+
+So `scripts/copy-prisma-engine.mjs` copies `schema.prisma` + the engines into
+`apps/web/generated/client` before `next build`, and `outputFileTracingIncludes` names
+`generated/client/**` *project-relative*. Five settings in total: `output`, `binaryTargets`,
+the copy, the trace includes, and `generated/**` in turbo's build outputs — without that last
+one a cache *hit* restores `dist/` and omits the client, so the deploy that breaks is the
+second one. `pnpm verify:prisma` checks the copy and the trace;
+`apps/web/lib/prismaDeploy.test.ts` guards the settings in the fast suite. The only check that
+distinguishes deployed from findable is the local reproduction in docs/deployment.md.
 
 **Two localhost defaults are refused in production.** `API_PUBLIC_URL` and `WEB_APP_URL`
 (and `AUTH_URL`/`API_BASE_URL` on the web side) have defaults that are right on a laptop
@@ -901,15 +921,19 @@ them.
 > production guard refuses to boot. Measured rather than assumed: after a six-minute gap in
 > the one-minute sweeper BullMQ ran **one** catch-up tick, not six — which is what makes a
 > sleeping free service late rather than lossy, and is written up honestly in the README.
-> Then, from a real Vercel failure: the Prisma Query Engine fix above — explicit generator
-> `output`, `binaryTargets`, `outputFileTracingIncludes`, `generated/**` in turbo outputs,
-> `scripts/verify-prisma-trace.mjs`, and the walkthrough in docs/deployment.md.
-> Verified by reading the trace manifests `next build` writes: before, 718 traced files with
-> exactly one from `packages/db` and no Prisma at all; after, 41 from `packages/db` including
-> `libquery_engine-rhel-openssl-3.0.x.so.node` and the `runtime/` directory. Removing
-> `outputFileTracingIncludes` drops it back to 5 and the verifier fails, which is also how
-> the two distinct failure modes were separated (engine traced but client JS not → `Cannot
-> find module`; neither → the engine error). The compiled API still serves /health green, so
-> moving the client did not disturb the Render path.
+> Then, from a real Vercel failure: explicit generator `output`, `binaryTargets`,
+> `outputFileTracingIncludes`, `generated/**` in turbo outputs, and a walkthrough in
+> docs/deployment.md. Trace manifests went from 718 files with one from `packages/db` and no
+> Prisma at all, to 41 from `packages/db` including the Linux engine.
+> **That deploy still failed**, and the second round is the one worth reading: being in the
+> trace is not being where Prisma looks. A bundled client resolves its engine under
+> `process.cwd()`, so the fix is `scripts/copy-prisma-engine.mjs` putting the schema and
+> engine at `apps/web/generated/client`, plus a project-relative trace include.
+> Verified by rebuilding the deployed layout from the build's own trace manifests, standing in
+> a data-file-stripped copy of the client for the webpack bundle, moving the build-time path
+> aside, and running a real query from a fake `/var/task/apps/web`: it returns a row with the
+> copy in place, and without it reproduces the production error and its three-path searched
+> list exactly. The old checker passed in both states, which is why it was replaced.
+> The compiled API still serves /health green, so moving the client did not disturb Render.
 > Not verified: an actual Render or Vercel deploy.
 > Update this line as we progress.

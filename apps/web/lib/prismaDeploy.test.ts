@@ -10,10 +10,15 @@ import { describe, expect, it } from "vitest";
  * in this repo and then throws `PrismaClientInitializationError: Prisma Client could not
  * locate the Query Engine` on the first request in production.
  *
- * `pnpm verify:trace` checks the real outcome — that `next build` put the client and the
- * engine in the file trace — but it needs a build first. These are the fast guard: they
- * fail on the *edit* that would cause it, which is the one somebody makes while tidying a
- * config they do not have the history for.
+ * `pnpm verify:prisma` checks the real outcome against a build. These are the fast guard:
+ * they fail on the *edit* that would cause it, which is the one somebody makes while tidying
+ * a config they do not have the history for.
+ *
+ * One of them is here because the first attempt at this fix passed its own check and the
+ * deploy still failed. Tracing the engine into `packages/db/generated/client` shipped it —
+ * and Prisma never looked there, because Next bundles the client and a bundled client
+ * resolves its engine under `process.cwd()`. Being deployed and being findable are
+ * different properties, and only the second one keeps the site up.
  */
 
 /** Repo-relative read. `process.cwd()` is apps/web when vitest runs here. */
@@ -97,5 +102,51 @@ describe("turbo caches the generated client with the build", () => {
       tasks: { build: { outputs: string[] } };
     };
     expect(turbo.tasks.build.outputs).toContain("generated/**");
+  });
+});
+
+describe("the engine is copied where a bundled client will look", () => {
+  /*
+   * The load-bearing one. From the generated client's own source:
+   *
+   *     config.dirname = __dirname
+   *     if (!fs.existsSync(path.join(__dirname, 'schema.prisma'))) {
+   *       const alternativePaths = ["generated/client", "client"]
+   *       ... config.dirname = path.join(process.cwd(), alternativePath)
+   *     }
+   *
+   * Next bundles the client — `serverExternalPackages` matches package specifiers and
+   * `packages/db` reaches its client by relative path — so `__dirname` becomes a build-time
+   * string and that branch always fires in a deployed function. `process.cwd()` there is the
+   * project directory, so the engine has to be at `apps/web/generated/client`.
+   */
+
+  it("runs the copy before next build", () => {
+    const pkg = JSON.parse(repoFile("apps/web/package.json")) as {
+      scripts: Record<string, string>;
+    };
+    expect(pkg.scripts.build).toContain("copy-prisma-engine.mjs");
+    // And in dev, so a local run resolves the engine the same way a deployed one does.
+    expect(pkg.scripts.dev).toContain("copy-prisma-engine.mjs");
+  });
+
+  it("traces the copy from inside the project directory, not only from packages/db", () => {
+    /*
+     * Project-relative, so the function receives it at `<task root>/apps/web/generated/client`
+     * — the path Prisma searches first. `../../packages/db/...` lands at
+     * `<task root>/packages/db/...`, which is shipped and never consulted once bundled.
+     */
+    const config = repoFile("apps/web/next.config.mjs");
+    expect(config).toContain('"generated/client/**"');
+  });
+
+  it("copies the schema as well as the engine", () => {
+    /*
+     * `schema.prisma` is not incidental: its presence is the condition Prisma tests to pick
+     * the directory at all, and the engine is then loaded from beside it.
+     */
+    const script = repoFile("scripts/copy-prisma-engine.mjs");
+    expect(script).toContain("schema.prisma");
+    expect(script).toContain(".node");
   });
 });

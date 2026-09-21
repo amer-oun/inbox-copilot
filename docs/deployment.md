@@ -203,74 +203,102 @@ production:
 
 ```
 PrismaClientInitializationError: Prisma Client could not locate the Query Engine
+The following locations have been searched:
+  /var/task/apps/web/generated/client
+  /var/task/apps/web/.next/server
+  /vercel/path0/packages/db/generated/client
+  /var/task/apps/web/.prisma/client
+  /tmp/prisma-engines
 ```
 
-**Nothing is wrong with the database connection when you see this.** The function is missing
-files. Four settings in this repo fix it, all of them already committed; this section is here
-so that if one is ever removed, the next person knows what they are looking at.
+**Nothing is wrong with the database connection when you see this, and shipping the engine is
+not enough on its own.** Read the list: `/vercel/path0` is the *build* machine's path, gone by
+the time the function runs, and every live path it tries is under `/var/task/apps/web`. The
+engine that `prisma generate` produced is at `/var/task/packages/db/generated/client` — which
+can be deployed perfectly and still never be looked at. That is the trap, and it is worth
+being precise about because the obvious fix does not work.
 
-**What Vercel deploys is not your `node_modules`.** Next.js traces the files each route
-actually needs and Vercel copies *those* into the serverless function. Measured on this repo
-before the fix: 718 traced files for the web app, of which exactly **one** came from
-`packages/db` — its `package.json` — and **none** were Prisma. The engine was never in the
-function, so it could not be located.
+#### Why it looks under `apps/web` at all
 
-Two separate reasons it was missing, which is why one fix alone was not enough:
+From the generated client's own source, `packages/db/generated/client/index.js`:
 
-1. **The client was generated into a path nothing could name.** The default output is
-   `node_modules/.prisma/client`, which under pnpm means a content-hashed directory like
-   `node_modules/.pnpm/@prisma+client@6.19.3_prism_f06fed13…/node_modules/.prisma/client`.
-   You cannot write that in a config file, and it changes when a peer dependency changes.
+```js
+config.dirname = __dirname
+if (!fs.existsSync(path.join(__dirname, 'schema.prisma'))) {
+  const alternativePaths = ["generated/client", "client"]
+  const alternativePath = alternativePaths.find((altPath) =>
+    fs.existsSync(path.join(process.cwd(), altPath, 'schema.prisma'))
+  ) ?? alternativePaths[0]
+  config.dirname = path.join(process.cwd(), alternativePath)
+  config.isBundled = true
+}
+```
 
-   Worse, under pnpm there can be more than one. This workspace resolves `@prisma/client`
-   **twice**, peer-split by TypeScript version — `apps/web` pins TypeScript 6 because Next 15
-   cannot use the TS 7 compiler API, everything else is on 7 — and `prisma generate` writes
-   into one of them. The instance the web app's own dependency graph reaches (via
-   `@auth/prisma-adapter`) was the other one: no generated client in it and no engine at all.
-   That is why this broke on the web app and not on the API.
+Two branches. If `schema.prisma` sits beside the code, Prisma loads the engine from there. If
+it does not — which is what "bundled" means — Prisma looks under **`process.cwd()`**, and in a
+Vercel function the working directory is the project directory: `/var/task/apps/web`.
 
-2. **`serverExternalPackages` stops Next walking the package.** Keeping `@prisma/client` and
-   `@inbox-copilot/db` external is correct — a native `.node` binary must not be bundled, and
-   bundling would rewrite the relative path Prisma's engine lookup depends on. But an
-   external package that nothing traced is a package that is simply absent from the function.
+Next.js *does* bundle it. `serverExternalPackages` matches package specifiers, and
+`packages/db` reaches its client by a relative path (`../generated/client/index.js`), which is
+not one. Webpack inlines it into a server chunk and replaces `__dirname` with a build-time
+string literal — which is why `/vercel/path0/packages/db/generated/client` appears in the
+searched list at all, and why the first branch can never win in a deployed function.
 
-So, the four settings:
+So the engine has to be at `apps/web/generated/client`, and no amount of tracing from
+`packages/db` will put it there.
+
+#### The five settings
 
 | Where | Setting | What it does |
 |---|---|---|
-| `packages/db/prisma/schema.prisma` | `output = "../generated/client"` | Generates into `packages/db/generated/client` — an ordinary directory in an ordinary package, at a path a config file can name. Also collapses the two pnpm instances into one client that `packages/db` imports by **relative path**, so peer resolution cannot pick the wrong copy. |
-| same | `binaryTargets = ["native", "rhel-openssl-3.0.x"]` | `rhel-openssl-3.0.x` is Vercel's Node runtime; `native` keeps a laptop working. Vercel's build image and runtime usually match, and "usually" is not a thing to deploy on. |
-| `apps/web/next.config.mjs` | `outputFileTracingIncludes` | Names `packages/db/dist/**` and `packages/db/generated/client/**` so both are copied into every function. |
-| `turbo.json` | `generated/**` in `tasks.build.outputs` | **The subtle one.** `packages/db`'s build is `prisma generate && tsc`. Without this, a turbo cache *hit* restores `dist/` and silently omits the generated client — so the deploy that breaks is the second one, with no change to explain it. |
+| `packages/db/prisma/schema.prisma` | `output = "../generated/client"` | Generates into `packages/db/generated/client` — a path a config file can name, rather than a content-hashed `node_modules/.pnpm/@prisma+client@…` directory. Also collapses the two pnpm instances of `@prisma/client` this workspace resolves (peer-split by TypeScript version) into one client imported by relative path. |
+| same | `binaryTargets = ["native", "rhel-openssl-3.0.x"]` | `rhel-openssl-3.0.x` is Vercel's Node runtime; `native` keeps a laptop working. |
+| `scripts/copy-prisma-engine.mjs`, run by `apps/web`'s `build` | copies `schema.prisma` + the engines into `apps/web/generated/client` | **The one that actually fixes the error above.** It puts the two files Prisma reads at the path a bundled client resolves to. |
+| `apps/web/next.config.mjs` | `outputFileTracingIncludes` | `generated/client/**` — project-relative, so it deploys to `/var/task/apps/web/generated/client`. The `../../packages/db/**` entries stay as the other half of the pair, for the case where Next does *not* bundle the client and `__dirname` is real. |
+| `turbo.json` | `generated/**` in `tasks.build.outputs` | `packages/db`'s build is `prisma generate && tsc`. Without this a cache *hit* restores `dist/` and omits the client, so the deploy that breaks is the second one with no change to explain it. |
 
-`prisma generate` itself already runs on Vercel: it is the first half of `packages/db`'s build
+`prisma generate` already runs on Vercel — it is the first half of `packages/db`'s build
 script, and the build command's `--filter` builds that package first. It was never the missing
 piece.
 
-**Root directory is not the fix.** Moving Vercel's root directory to the repo root looks like
-it should help — the engine lives at the repo root, after all — but the tracing root was
-already the workspace root (686 of those 718 files came from `node_modules/.pnpm`). The
-problem was never *where* tracing started; it was that these particular files were excluded
-from it. Root directory stays `apps/web`, which is also what lets Vercel detect Next.js, and
-`outputFileTracingRoot` in `next.config.mjs` now states the tracing root explicitly so it no
-longer depends on which directory the build was invoked from.
+**Root directory is not the fix either.** Moving Vercel's root directory to the repo root
+looks like it should help, since the engine lives under the repo root — but it would move
+`process.cwd()` too, and Prisma would then look under the repo root instead. The paths it
+searches are derived from cwd, not from where the files happen to be. Root directory stays
+`apps/web`, which is also what lets Vercel detect Next.js.
 
-**Checking it, without deploying.** After a build:
+#### Checking it without deploying
 
 ```bash
-pnpm verify:trace
+pnpm verify:prisma      # after a web build
 ```
 
-That reads the `.nft.json` manifests `next build` writes and asserts the client, the
-`runtime/` directory and the Linux engine are all in them. It is worth running after
-upgrading Next or Prisma, and after touching `serverExternalPackages` or
-`outputFileTracingIncludes`. The two failure modes it distinguishes:
+This checks the two things that matter in the order the runtime needs them: the copy exists at
+`apps/web/generated/client` with both `schema.prisma` and the Linux engine, and that path is in
+Next's file trace so it is deployed rather than merely built. It also checks the
+`packages/db` copy, for the not-bundled case.
 
-- engine present, client JS missing → `Cannot find module` at runtime;
-- both missing → the `could not locate the Query Engine` error above.
+`apps/web/lib/prismaDeploy.test.ts` guards the settings in the fast suite, so deleting one
+fails `pnpm test` rather than a deploy.
 
-`apps/web/lib/prismaDeploy.test.ts` guards the same four settings in the fast test suite, so
-deleting one fails `pnpm test` rather than a deploy.
+#### Reproducing it locally
+
+Worth knowing how, because the first attempt at this fix passed a check that only asserted the
+engine was in the trace — it was, and the deploy failed anyway. The deployed layout can be
+rebuilt from the build's own trace manifests:
+
+1. build the web app, then copy every file named in `apps/web/.next/**/*.nft.json` to
+   `<tmp>/<path relative to the repo root>`, and copy `.next` itself;
+2. put a copy of `packages/db/generated/client` into `<tmp>/apps/web/.next/server/chunks/` with
+   `schema.prisma` and the `*.node` engines **deleted** — that is what a bundled client looks
+   like;
+3. move `packages/db/generated/client/schema.prisma` and its engine aside, so the build-time
+   path is as absent as `/vercel/path0` is at runtime (move them back afterwards);
+4. `chdir` to `<tmp>/apps/web`, `require` the bundle copy, and run a query.
+
+With the copy in place that query succeeds. With `<tmp>/apps/web/generated` removed it fails
+with the same message and the same three-path structure as production. That is the only check
+that distinguishes "deployed" from "findable".
 
 ## 4. Google Cloud OAuth clients
 
