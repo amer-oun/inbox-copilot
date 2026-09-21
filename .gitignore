@@ -17,3 +17,20 @@ coverage/
 
 .DS_Store
 *.log
+
+# Local AI assistant configuration. Kept on disk, never committed — these instruct a
+# coding assistant, they are not project documentation. ARCHITECTURE.md, README.md and
+# docs/ are the tracked docs; nothing here is referenced by them.
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+.claude/
+.cursor/
+.cursorrules
+.continue/
+.aider*
+.windsurfrules
+.clinerules
+.github/copilot-instructions.md
+.mcp.json

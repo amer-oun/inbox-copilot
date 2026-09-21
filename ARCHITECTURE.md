@@ -111,7 +111,6 @@ inbox-copilot/
 │   └── config/        # eslint, tsconfig, prettier
 │
 ├── docker-compose.yml # postgres + redis for local dev
-├── CLAUDE.md          # context file for Claude Code
 └── turbo.json
 ```
 

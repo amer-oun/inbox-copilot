@@ -10,8 +10,7 @@ time you choose, and remind you when a message you expected an answer to has gon
 What it will never do is send mail on its own — every generated word is a draft until a
 person presses send.
 
-Full design rationale is in **[ARCHITECTURE.md](ARCHITECTURE.md)**; the working rules
-contributors are held to are in **[CLAUDE.md](CLAUDE.md)**.
+Full design rationale is in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 **[Live demo →](https://inbox-copilot-wheat.vercel.app)** — the web app on Vercel with
 the API on Render. You will get as far as the sign-in screen and no further: the Google

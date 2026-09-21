@@ -12,7 +12,7 @@
  * provider and quietly drifting between them.
  */
 
-/** The cost-aware cascade from §5. Mirrors the block in CLAUDE.md. */
+/** The cost-aware cascade from §5: cheap for sorting, dear for judgement. */
 export const MODELS = {
   fast: "claude-haiku-4-5-20251001", // classify, priority, language detect
   standard: "claude-sonnet-5", // summarize, reply, compose, translate
@@ -114,8 +114,8 @@ export function modelFor(feature: AiFeature, provider: AiProviderName): ModelId 
 }
 
 /**
- * The Anthropic routing as a named table, because §5 and CLAUDE.md both quote it and
- * because it is the answer to "what does this application call by default". Derived from
+ * The Anthropic routing as a named table, because §5 quotes it and because it is the
+ * answer to "what does this application call by default". Derived from
  * `FEATURE_TIERS` rather than restated, so the two cannot disagree.
  */
 export const FEATURE_MODELS = {

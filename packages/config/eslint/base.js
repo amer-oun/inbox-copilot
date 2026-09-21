@@ -37,7 +37,8 @@ export const base = tseslint.config(
   {
     files: ["**/*.{ts,tsx,mts,cts}"],
     rules: {
-      // The house rules, made mechanical (CLAUDE.md "Conventions").
+      // The house rules, made mechanical: no `any`, no non-null `!` outside tests,
+      // type-only imports written as such, and no stray `console`.
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-non-null-assertion": "error",
       /*

@@ -54,7 +54,7 @@ describe("tier routing", () => {
   });
 
   it("keeps FEATURE_MODELS in step with the tiers rather than restating them", () => {
-    // Derived, so the named table §5 and CLAUDE.md quote cannot disagree with the router.
+    // Derived, so the named table §5 quotes cannot disagree with the router.
     for (const feature of FEATURES) {
       expect(FEATURE_MODELS[feature]).toBe(modelFor(feature, "anthropic"));
     }

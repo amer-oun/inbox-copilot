@@ -25,13 +25,13 @@ export default [
               name: "googleapis",
               allowTypeImports: true,
               message:
-                "Provider SDKs stay behind MailProvider — see apps/api/src/providers/ (CLAUDE.md rule 5).",
+                "googleapis may only be imported inside apps/api/src/providers/. Everything above the port codes against the MailProvider interface, so no feature branches on which mailbox it is reading.",
             },
             {
               name: "@microsoft/microsoft-graph-client",
               allowTypeImports: true,
               message:
-                "Provider SDKs stay behind MailProvider — see apps/api/src/providers/ (CLAUDE.md rule 5).",
+                "@microsoft/microsoft-graph-client may only be imported inside apps/api/src/providers/. Everything above the port codes against the MailProvider interface, so no feature branches on which mailbox it is reading.",
             },
           ],
         },

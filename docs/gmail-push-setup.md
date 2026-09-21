@@ -147,7 +147,7 @@ Then send yourself an email and watch the API log for `gmail push accepted`, fol
 | `users.watch` → 400 "Invalid topicName" | Topic name is not the full `projects/…/topics/…` form, or it lives in another project. |
 | Webhook logs `rejected a push token` | Audience mismatch (step 5 vs `GMAIL_PUBSUB_AUDIENCE`), or the subscription's service account is not the one in `GMAIL_PUBSUB_SERVICE_ACCOUNT`. |
 | Webhook returns 204 but nothing syncs | The address in the notification matches no `MailAccount`, or the mailbox is `REVOKED`. Check the log line's `mailboxes: 0`. |
-| Nothing arrives at all, watch looks healthy | The subscription was deleted or its endpoint is wrong. The hourly keeper notices within an hour and syncs anyway — see "silence" in CLAUDE.md. |
+| Nothing arrives at all, watch looks healthy | The subscription was deleted or its endpoint is wrong. Nothing in our own data says so — an inbox with no new mail looks exactly like a working one — so the watch keeper runs hourly and queues a catch-up delta for any mailbox that has not synced in an hour, whatever its `watchExpiresAt` says. Mail still arrives; it stops being real time. |
 
 ---
 
