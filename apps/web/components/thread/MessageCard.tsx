@@ -1,6 +1,7 @@
 import { AlertTriangle, Paperclip } from "lucide-react";
 import type { MessageDto } from "@inbox-copilot/shared";
 import { Badge } from "../ui/badge";
+import { Avatar } from "../shell/Avatar";
 import { cn } from "../../lib/utils";
 import { MessageBody } from "./MessageBody";
 import { TranslateControl } from "./TranslateControl";
@@ -10,6 +11,11 @@ import { TranslateControl } from "./TranslateControl";
  *
  * The header is a server component; only the body needs the client, so the
  * addresses and attachment list are in the server-rendered HTML.
+ *
+ * The user's own messages are marked by an indented, tinted envelope rather than
+ * by being dimmed. Dimming implied "less important" about text the reader wrote
+ * themselves, when what is actually being said is "this side of the conversation
+ * is yours" — and a greyed-out message in a thread reads as failed or deleted.
  */
 
 function formatSentAt(iso: string): string {
@@ -34,11 +40,16 @@ function AttachmentList({ attachments }: { attachments: MessageDto["attachments"
   if (files.length === 0) return null;
 
   return (
-    <ul className="flex flex-wrap gap-2 border-t border-border-subtle px-4 py-3">
+    <ul className="flex flex-wrap gap-2 border-t border-line px-4 py-3">
       {files.map((file) => (
         <li
           key={file.id}
-          className="flex items-center gap-2 rounded-lg border border-border-subtle bg-canvas px-2.5 py-1.5 text-xs"
+          className={cn(
+            "flex items-center gap-2 rounded-[var(--radius-control)] border px-2.5 py-1.5 text-xs",
+            file.riskFlag === null
+              ? "border-line bg-panel"
+              : "border-danger-line bg-danger-soft",
+          )}
         >
           {file.riskFlag === null ? (
             <Paperclip aria-hidden="true" className="size-3.5 text-muted" />
@@ -47,10 +58,12 @@ function AttachmentList({ attachments }: { attachments: MessageDto["attachments"
             // it is shown plainly rather than as a score.
             <AlertTriangle aria-hidden="true" className="size-3.5 text-danger" />
           )}
-          <span className="max-w-[14rem] truncate text-ink">{file.filename}</span>
-          <span className="text-muted">{formatBytes(file.sizeBytes)}</span>
+          <span className="max-w-[14rem] truncate font-medium text-ink">
+            {file.filename}
+          </span>
+          <span className="tabular-nums text-muted">{formatBytes(file.sizeBytes)}</span>
           {file.riskFlag !== null && (
-            <Badge tone="danger" className="ml-1">
+            <Badge tone="danger" size="sm" className="ml-0.5">
               {file.riskFlag}
             </Badge>
           )}
@@ -75,24 +88,36 @@ export function MessageCard({
   return (
     <article
       className={cn(
-        "overflow-hidden rounded-card border bg-surface",
-        // The user's own messages are visually secondary: they already know them.
-        message.isOutbound ? "border-border-subtle/70 bg-canvas" : "border-border-subtle",
+        "overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface",
+        "shadow-raise",
+        message.isOutbound && "sm:ml-8",
       )}
     >
-      <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1 px-4 py-3">
+      <header
+        className={cn(
+          "flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3",
+          message.isOutbound && "bg-panel/70",
+        )}
+      >
+        <Avatar
+          name={message.from.name}
+          email={message.from.email}
+          className="size-7 text-[0.625rem]"
+        />
         <span className="text-sm font-semibold text-ink">{sender}</span>
         {message.from.name !== null && (
-          <span className="text-xs text-muted">&lt;{message.from.email}&gt;</span>
+          <span className="truncate text-xs text-muted">
+            &lt;{message.from.email}&gt;
+          </span>
         )}
         {message.isOutbound && (
-          <Badge tone="neutral" className="ml-1">
+          <Badge tone="neutral" size="sm">
             Sent
           </Badge>
         )}
         <time
           dateTime={message.sentAt}
-          className="ml-auto shrink-0 text-xs text-muted"
+          className="ml-auto shrink-0 text-xs tabular-nums text-muted"
           title={message.sentAt}
         >
           {formatSentAt(message.sentAt)}
@@ -103,7 +128,7 @@ export function MessageCard({
         </p>
       </header>
 
-      <div className="border-t border-border-subtle">
+      <div className="border-t border-line">
         <MessageBody
           html={message.bodyHtmlSanitized}
           text={message.bodyText}

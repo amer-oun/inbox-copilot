@@ -231,7 +231,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
 
   if (recipients.length === 0) {
     return (
-      <section className="rounded-card border border-border-subtle bg-surface px-4 py-3 text-sm text-muted">
+      <section className="rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3.5 text-sm text-muted">
         There is nobody to reply to in this thread.
       </section>
     );
@@ -240,9 +240,9 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
   return (
     <section
       aria-labelledby="reply-composer-heading"
-      className="rounded-card border border-border-subtle bg-surface"
+      className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-surface shadow-raise"
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border-subtle px-4 py-3">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-panel/70 px-4 py-2.5">
         <h2 id="reply-composer-heading" className="text-sm font-semibold text-ink">
           Reply
         </h2>
@@ -257,7 +257,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
           id="reply-tone"
           value={tone}
           onChange={(event) => setTone(event.target.value as ReplyTone)}
-          className="h-8 rounded-lg border border-border-subtle bg-canvas px-2 text-xs text-ink"
+          className="h-8 rounded-[var(--radius-control)] border border-line-strong bg-surface px-2 text-xs text-ink transition-colors hover:bg-raised"
         >
           {TONES.map((option) => (
             <option key={option} value={option}>
@@ -273,9 +273,9 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
           disabled={generate.isPending}
         >
           {generate.isPending ? (
-            <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+            <Loader2 aria-hidden="true" className="animate-spin" />
           ) : (
-            <Sparkles aria-hidden="true" className="size-3.5" />
+            <Sparkles aria-hidden="true" />
           )}
           {drafts.length === 0 ? "Draft 3 replies" : "Redraft"}
         </Button>
@@ -284,16 +284,16 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
       {generate.isError && (
         <p
           role="alert"
-          className="border-b border-border-subtle px-4 py-2 text-sm text-danger"
+          className="border-b border-line bg-danger-soft px-4 py-2 text-sm text-danger"
         >
           {generate.error.message}
         </p>
       )}
 
       {drafts.length > 0 && (
-        <div className="border-b border-border-subtle px-4 py-3">
+        <div className="border-b border-line px-4 py-3.5">
           <p className="flex items-center gap-1.5 text-xs text-muted">
-            <Sparkles aria-hidden="true" className="size-3.5" />
+            <Sparkles aria-hidden="true" />
             <span className="sr-only">AI-generated: </span>
             {styleApplied === false
               ? "Three AI drafts. No writing-style profile yet, so these sound generic — read before sending."
@@ -308,16 +308,17 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                   onClick={() => pick(draft)}
                   aria-pressed={draft.id === selectedId}
                   className={cn(
-                    "h-full w-full rounded-lg border px-3 py-2 text-left transition-colors",
+                    "h-full w-full rounded-[var(--radius-control)] border px-3 py-2.5 text-left",
+                    "transition-colors duration-150 ease-[var(--ease-out-quart)]",
                     draft.id === selectedId
-                      ? "border-accent bg-accent/10"
-                      : "border-border-subtle bg-canvas hover:border-accent/50",
+                      ? "border-accent bg-accent-soft"
+                      : "border-line bg-panel hover:border-line-strong hover:bg-raised",
                   )}
                 >
-                  <span className="block text-xs font-medium text-ink">
+                  <span className="block text-xs font-semibold text-ink">
                     {draft.label ?? `Draft ${index + 1}`}
                   </span>
-                  <span className="mt-1 line-clamp-3 block text-xs text-muted">
+                  <span className="mt-1 line-clamp-3 block text-xs leading-relaxed text-muted">
                     {draft.body}
                   </span>
                 </button>
@@ -326,7 +327,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
           </ul>
 
           {pendingPick !== null && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-warning-line bg-warning-soft px-3 py-2 text-xs text-ink">
               <TriangleAlert aria-hidden="true" className="size-3.5 text-warning" />
               Replace what you have written with this draft?
               <Button size="sm" variant="outline" onClick={confirmPick}>
@@ -340,7 +341,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
         </div>
       )}
 
-      <div className="px-4 py-3">
+      <div className="px-4 py-3.5">
         <label htmlFor="reply-body" className="sr-only">
           Your reply
         </label>
@@ -355,11 +356,11 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
           }}
           rows={8}
           placeholder="Write your reply, or draft three and edit one."
-          className="w-full resize-y rounded-lg border border-border-subtle bg-canvas px-3 py-2 text-sm text-ink placeholder:text-muted"
+          className="w-full resize-y rounded-[var(--radius-control)] border border-line-strong bg-canvas px-3 py-2.5 text-sm leading-relaxed text-ink transition-colors placeholder:text-muted focus:bg-surface"
         />
 
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <p className="text-xs text-muted" aria-live="polite">
+          <p className="text-xs tabular-nums text-muted" aria-live="polite">
             {selected === null
               ? `${body.trim().length} characters`
               : `${body.trim().length} characters · ${edited ? "edited from the draft" : "unchanged from the draft"}`}
@@ -376,9 +377,9 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                 </Button>
                 <Button size="sm" onClick={() => send.mutate()} disabled={send.isPending}>
                   {send.isPending ? (
-                    <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                    <Loader2 aria-hidden="true" className="animate-spin" />
                   ) : (
-                    <Send aria-hidden="true" className="size-3.5" />
+                    <Send aria-hidden="true" />
                   )}
                   Confirm send
                 </Button>
@@ -397,7 +398,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                   aria-expanded={scheduling}
                   disabled={body.trim() === ""}
                 >
-                  <CalendarClock aria-hidden="true" className="size-3.5" />
+                  <CalendarClock aria-hidden="true" />
                   Send later
                 </Button>
                 <Button
@@ -405,7 +406,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                   onClick={() => setConfirming(true)}
                   disabled={body.trim() === "" || send.isPending}
                 >
-                  <Send aria-hidden="true" className="size-3.5" />
+                  <Send aria-hidden="true" />
                   Send reply
                 </Button>
               </>
@@ -414,7 +415,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
         </div>
 
         {scheduling && (
-          <div className="mt-3 rounded-lg border border-border-subtle bg-canvas px-3 py-3">
+          <div className="mt-3 rounded-[var(--radius-control)] border border-line bg-panel px-3.5 py-3.5">
             <div className="flex flex-wrap items-end gap-3">
               <div>
                 <label
@@ -429,7 +430,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                   value={sendAtLocal}
                   min={localWallClock(new Date())}
                   onChange={(event) => setSendAtLocal(event.target.value)}
-                  className="mt-1 h-8 rounded-lg border border-border-subtle bg-surface px-2 text-xs text-ink"
+                  className="mt-1 h-9 rounded-[var(--radius-control)] border border-line-strong bg-surface px-2 text-xs text-ink"
                 />
               </div>
 
@@ -439,9 +440,9 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
                 disabled={schedule.isPending || sendAtLocal === ""}
               >
                 {schedule.isPending ? (
-                  <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+                  <Loader2 aria-hidden="true" className="animate-spin" />
                 ) : (
-                  <CalendarClock aria-hidden="true" className="size-3.5" />
+                  <CalendarClock aria-hidden="true" />
                 )}
                 Schedule
               </Button>

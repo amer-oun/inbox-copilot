@@ -14,7 +14,7 @@ import { requireSession } from "../../lib/session";
 import { z } from "zod";
 
 /**
- * Mailbox connect/disconnect, driven from /settings/accounts.
+ * Mailbox connect/disconnect, driven from /settings.
  *
  * The action asks the core API for a consent URL and then redirects the browser
  * to the provider. It never sees a token: the provider redirects back to the API,
@@ -22,7 +22,7 @@ import { z } from "zod";
  */
 
 export async function connectMailAccountAction(formData: FormData): Promise<void> {
-  const session = await requireSession("/settings/accounts");
+  const session = await requireSession("/settings");
   const provider: ProviderSlug = providerSlugSchema.parse(formData.get("provider"));
 
   const { authorizeUrl } = await apiFetch(
@@ -37,7 +37,7 @@ export async function connectMailAccountAction(formData: FormData): Promise<void
 }
 
 export async function disconnectMailAccountAction(formData: FormData): Promise<void> {
-  const session = await requireSession("/settings/accounts");
+  const session = await requireSession("/settings");
   const mailAccountId = z.string().min(1).parse(formData.get("mailAccountId"));
 
   const outcome = await apiFetch(
@@ -47,14 +47,14 @@ export async function disconnectMailAccountAction(formData: FormData): Promise<v
     { method: "DELETE" },
   );
 
-  revalidatePath("/settings/accounts");
+  revalidatePath("/settings");
 
   // Only a flag travels in the URL: the page owns the provider's consent link, so
   // no URL from a response is ever reflected into an href.
   redirect(
     outcome.revoked
-      ? "/settings/accounts?disconnected=revoked"
-      : "/settings/accounts?disconnected=manual",
+      ? "/settings?disconnected=revoked#mailboxes"
+      : "/settings?disconnected=manual#mailboxes",
   );
 }
 
@@ -63,7 +63,7 @@ export async function disconnectMailAccountAction(formData: FormData): Promise<v
  * double click reports "already running" rather than syncing twice.
  */
 export async function syncMailAccountAction(formData: FormData): Promise<void> {
-  const session = await requireSession("/settings/accounts");
+  const session = await requireSession("/settings");
   const mailAccountId = z.string().min(1).parse(formData.get("mailAccountId"));
 
   const result = await apiFetch(
@@ -73,10 +73,10 @@ export async function syncMailAccountAction(formData: FormData): Promise<void> {
     { method: "POST" },
   );
 
-  revalidatePath("/settings/accounts");
+  revalidatePath("/settings");
   redirect(
     result.enqueued
-      ? "/settings/accounts?sync=queued"
-      : "/settings/accounts?sync=running",
+      ? "/settings?sync=queued#mailboxes"
+      : "/settings?sync=running#mailboxes",
   );
 }

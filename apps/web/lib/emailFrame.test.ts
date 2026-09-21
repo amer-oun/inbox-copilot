@@ -177,3 +177,24 @@ describe("the frame document", () => {
     ).not.toThrow();
   });
 });
+
+describe("the frame stays light in a dark app", () => {
+  /*
+   * A deliberate property, not an oversight. Senders write inline colours for a
+   * white page — black text on cells they expect to be white, logos cut on
+   * transparent PNGs, `bgcolor="#ffffff"` on half a table. Darkening the ground
+   * underneath that produces black-on-black paragraphs and white boxes floating
+   * in a dark frame, and every one of those looks like our bug rather than the
+   * sender's design. The app around the frame is themed; the mail is not.
+   */
+  it("declares a light colour scheme and a white ground", () => {
+    const doc = buildEmailFrameSrcDoc({ html: "<p>hi</p>", loadRemoteImages: false });
+    expect(doc).toContain("color-scheme: light");
+    expect(doc).toContain("background: #ffffff");
+  });
+
+  it("carries no dark-mode override of its own", () => {
+    const doc = buildEmailFrameSrcDoc({ html: "<p>hi</p>", loadRemoteImages: false });
+    expect(doc).not.toContain("prefers-color-scheme");
+  });
+});

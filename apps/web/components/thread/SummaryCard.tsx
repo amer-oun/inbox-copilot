@@ -1,6 +1,5 @@
 import { CheckSquare, Sparkles } from "lucide-react";
 import type { ThreadSummaryDto } from "@inbox-copilot/shared";
-import { Badge } from "../ui/badge";
 
 /**
  * The AI summary, above the conversation.
@@ -13,61 +12,80 @@ import { Badge } from "../ui/badge";
  *   2. Action items are shown as text, never as anything actionable. Nothing here
  *      is a button: the AI layer proposes, and every action stays an explicit,
  *      separate thing the user does (rule 1).
+ *
+ * The accent tint is the one place in the app a whole block is coloured, and it is
+ * spent here on purpose: it is the visual difference between "the senders wrote
+ * this" and "a model wrote this about it", which is the distinction the reader most
+ * needs and the hardest one to make with a label alone.
  */
 export function SummaryCard({ summary }: { summary: ThreadSummaryDto }) {
   return (
     <section
       aria-labelledby="thread-summary-heading"
-      className="rounded-card border border-accent/25 bg-accent/[0.04] p-4"
+      className="rounded-[var(--radius-card)] border border-accent-line bg-accent-soft"
     >
-      <header className="flex flex-wrap items-center gap-2">
-        <Sparkles aria-hidden="true" className="size-4 text-accent" />
-        <h2 id="thread-summary-heading" className="text-sm font-semibold text-ink">
+      <div className="p-4">
+        <header className="flex items-center gap-2">
+          <Sparkles aria-hidden="true" className="size-3.5 shrink-0 text-accent" />
+          <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-accent">
+            AI summary
+          </span>
+        </header>
+
+        <h2
+          id="thread-summary-heading"
+          className="mt-2 max-w-[60ch] text-[0.9375rem] font-semibold leading-snug text-ink"
+        >
           {summary.headline}
         </h2>
-        <Badge tone="info" className="ml-auto">
-          AI summary
-        </Badge>
-      </header>
 
-      <p className="mt-2.5 text-sm leading-relaxed text-ink/90">{summary.summary}</p>
+        <p className="mt-2 max-w-[70ch] text-[0.8125rem] leading-relaxed text-ink">
+          {summary.summary}
+        </p>
 
-      {summary.keyPoints.length > 0 && (
-        <ul className="mt-3 space-y-1.5">
-          {summary.keyPoints.map((point) => (
-            <li key={point} className="flex gap-2 text-sm text-muted">
-              <span
-                aria-hidden="true"
-                className="mt-[0.45rem] size-1 shrink-0 rounded-full bg-muted"
-              />
-              <span>{point}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {summary.actionItems.length > 0 && (
-        <div className="mt-4 border-t border-accent/20 pt-3">
-          <h3 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-            <CheckSquare aria-hidden="true" className="size-3.5" />
-            Suggested actions
-          </h3>
-          <ul className="mt-2 space-y-1.5">
-            {summary.actionItems.map((item) => (
-              <li key={`${item.owner}:${item.text}`} className="text-sm text-ink/90">
-                {item.text}
-                <span className="text-muted">
-                  {" — "}
-                  {item.owner === "user" ? "you" : item.owner}
-                  {item.dueDate === undefined ? "" : `, by ${item.dueDate}`}
-                </span>
+        {summary.keyPoints.length > 0 && (
+          <ul className="mt-3 space-y-1.5">
+            {summary.keyPoints.map((point) => (
+              <li
+                key={point}
+                className="flex gap-2.5 text-[0.8125rem] leading-relaxed text-muted"
+              >
+                <span
+                  aria-hidden="true"
+                  className="mt-[0.4375rem] size-1.5 shrink-0 rounded-full bg-accent/60"
+                />
+                <span className="max-w-[68ch]">{point}</span>
               </li>
             ))}
           </ul>
-        </div>
-      )}
+        )}
 
-      <p className="mt-3 text-[0.7rem] text-muted">
+        {summary.actionItems.length > 0 && (
+          <div className="mt-4 border-t border-accent-line pt-3">
+            <h3 className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider text-muted">
+              <CheckSquare aria-hidden="true" className="size-3" />
+              Suggested actions
+            </h3>
+            <ul className="mt-2 space-y-1.5">
+              {summary.actionItems.map((item) => (
+                <li
+                  key={`${item.owner}:${item.text}`}
+                  className="max-w-[70ch] text-[0.8125rem] leading-relaxed text-ink"
+                >
+                  {item.text}
+                  <span className="text-muted">
+                    {" — "}
+                    {item.owner === "user" ? "you" : item.owner}
+                    {item.dueDate === undefined ? "" : `, by ${item.dueDate}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <p className="border-t border-accent-line px-4 py-2 text-xs leading-relaxed text-muted">
         Generated by {summary.model} from the messages below. It can be wrong, and it
         describes what the senders wrote — not advice.
       </p>

@@ -1,15 +1,14 @@
 import { notFound } from "next/navigation";
-import Link from "next/link";
-import { Settings2 } from "lucide-react";
 import {
   threadCategoryFilterSchema,
   threadListSchema,
   type ThreadCategoryFilter,
 } from "@inbox-copilot/shared";
-import { apiFetch } from "../../../lib/apiClient";
-import { requireSession } from "../../../lib/session";
-import { CategoryTabs, CATEGORY_TABS } from "../../../components/inbox/CategoryTabs";
-import { ThreadList } from "../../../components/inbox/ThreadList";
+import { apiFetch } from "../../../../lib/apiClient";
+import { requireSession } from "../../../../lib/session";
+import { CategoryTabs, CATEGORY_TABS } from "../../../../components/inbox/CategoryTabs";
+import { ThreadList } from "../../../../components/inbox/ThreadList";
+import { PageHeader } from "../../../../components/shell/PageHeader";
 
 /**
  * The inbox, one category per URL.
@@ -27,7 +26,7 @@ interface InboxPageProps {
 export async function generateMetadata({ params }: InboxPageProps) {
   const { category } = await params;
   const tab = CATEGORY_TABS.find((entry) => entry.value.toLowerCase() === category);
-  return { title: tab ? `${tab.label} · Inbox Copilot` : "Inbox Copilot" };
+  return { title: tab ? `${tab.label} · Inbox` : "Inbox" };
 }
 
 export default async function InboxPage({ params }: InboxPageProps) {
@@ -48,24 +47,18 @@ export default async function InboxPage({ params }: InboxPageProps) {
   );
 
   return (
-    <main className="mx-auto min-h-dvh max-w-3xl">
-      <header className="flex items-center gap-3 px-4 pb-3 pt-6">
-        <h1 className="text-lg font-semibold tracking-tight text-ink">Inbox</h1>
-        <p className="text-xs text-muted">sorted by priority</p>
-        <Link
-          href="/settings/accounts"
-          className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted hover:text-ink"
-        >
-          <Settings2 aria-hidden="true" className="size-3.5" />
-          Mailboxes
-        </Link>
-      </header>
+    <>
+      <PageHeader title="Inbox" description="Most important first" width="wide">
+        <CategoryTabs active={category} />
+      </PageHeader>
 
-      <CategoryTabs active={category} />
-
-      <section className="bg-surface">
+      {/*
+        Wider than the reading pages: a thread row is a scanning surface, and a
+        prose measure would strand each timestamp half a screen from its sender.
+      */}
+      <div className="mx-auto w-full max-w-5xl">
         <ThreadList category={category} initialPage={initialPage} />
-      </section>
-    </main>
+      </div>
+    </>
   );
 }

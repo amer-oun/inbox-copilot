@@ -33,6 +33,7 @@ contributors are held to are in **[CLAUDE.md](CLAUDE.md)**.
 | **Scheduled send** | Pick a wall-clock time and a timezone; a database row is the source of truth and a sweeper recovers the send if Redis loses the job |
 | **Follow-ups** | Flag a message as expecting a reply and get reminded in N days — cancelled automatically the moment anything inbound lands on the thread. Optional digest email |
 | **Safe rendering** | Sender HTML is sanitized, sandboxed in an iframe with no scripts, and served under a CSP that blocks remote images until you ask for them |
+| **Interface** | One app shell across every signed-in page — Inbox, Scheduled, Follow-ups, Settings — as a sidebar on a wide screen and a bottom bar on a phone. Light and dark themes follow the device by default, with a three-way switch in the shell. Every text/background pair is checked against WCAG AA in both |
 
 ## Architecture on one screen
 
@@ -61,6 +62,17 @@ send, draft, start a watch. `googleapis` is imported _only_ inside
 `apps/api/src/providers/`, and ESLint enforces that. Gmail's shapes are flattened into
 our `Thread`/`Message` rows in `providers/gmail/map.ts`, so no feature above the port
 ever branches on which mailbox it is reading.
+
+**The web app's shell.** Every signed-in route lives in the `app/(app)/` group, so
+`AppShell` is defined once and cannot be missing from a page somebody adds later. It is
+a server component; the only client parts are the nav (which needs the current path) and
+the theme switch (which needs `localStorage`). Themes are plain CSS custom properties
+re-declared under `:root`, `@media (prefers-color-scheme: dark)` and
+`:root[data-theme="dark"]`, with `@theme inline` mapping them to Tailwind's names —
+`@theme` **cannot** be nested inside a media query, because Tailwind v4 hoists it and the
+last block silently wins. **Email bodies stay on white in both themes**: senders write
+inline colours for a white page, and darkening the ground under that produces
+black-on-black text that looks like our bug.
 
 **The queue/worker split.** The HTTP process answers requests and enqueues; the worker
 does everything slow or retryable. Nine queues, all BullMQ on Redis: `sync.backfill`,

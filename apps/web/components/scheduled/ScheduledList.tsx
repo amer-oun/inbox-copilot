@@ -84,13 +84,15 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
   const status = STATUS_COPY[item.status];
 
   return (
-    <li className="rounded-card border border-border-subtle bg-surface px-4 py-3">
+    <li className="rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3.5 shadow-raise">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-sm font-semibold text-ink">{item.subject}</span>
+        <span className="min-w-0 truncate text-sm font-semibold text-ink">
+          {item.subject}
+        </span>
         <Badge tone={status.tone}>{status.label}</Badge>
         {item.expectsReply && <Badge tone="neutral">Reminder set</Badge>}
-        <span className="ml-auto flex items-center gap-1.5 text-xs text-muted">
-          <CalendarClock aria-hidden="true" className="size-3.5" />
+        <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs tabular-nums text-muted">
+          <CalendarClock aria-hidden="true" />
           {whenLabel(item)}
         </span>
       </div>
@@ -98,7 +100,9 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
       <p className="mt-1 truncate text-xs text-muted">{`To ${item.to.join(", ")}`}</p>
 
       {item.bodyText !== null && (
-        <p className="mt-2 line-clamp-2 text-sm text-ink">{item.bodyText}</p>
+        <p className="mt-2 line-clamp-2 max-w-[70ch] text-[0.8125rem] leading-relaxed text-muted">
+          {item.bodyText}
+        </p>
       )}
 
       {/*
@@ -107,7 +111,7 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
         did not go out.
       */}
       {item.status === "FAILED" && (
-        <p className="mt-2 flex items-start gap-2 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-ink">
+        <p className="mt-2.5 flex items-start gap-2 rounded-[var(--radius-control)] border border-danger-line bg-danger-soft px-3 py-2 text-[0.8125rem] leading-relaxed text-ink">
           <CircleAlert
             aria-hidden="true"
             className="mt-0.5 size-4 shrink-0 text-danger"
@@ -123,7 +127,7 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
 
       {item.status === "SENDING" && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-          <Send aria-hidden="true" className="size-3.5" />
+          <Send aria-hidden="true" />
           On its way — too late to cancel.
         </p>
       )}
@@ -132,7 +136,7 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
         {item.threadId !== null && (
           <Link
             href={`/thread/${item.threadId}`}
-            className="text-xs text-muted underline hover:text-ink"
+            className="text-xs font-medium text-accent underline underline-offset-2 hover:no-underline"
           >
             Open the thread
           </Link>
@@ -155,14 +159,14 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
                   {cancel.isPending ? (
                     <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
                   ) : (
-                    <X aria-hidden="true" className="size-3.5" />
+                    <X aria-hidden="true" />
                   )}
                   Cancel send
                 </Button>
               </>
             ) : (
               <Button size="sm" variant="outline" onClick={() => setConfirming(true)}>
-                <X aria-hidden="true" className="size-3.5" />
+                <X aria-hidden="true" />
                 Cancel
               </Button>
             )}
@@ -182,14 +186,14 @@ function ScheduledRow({ item }: { item: ScheduledEmailDto }) {
 export function ScheduledList({ items }: { items: ScheduledEmailDto[] }) {
   if (items.length === 0) {
     return (
-      <p className="rounded-card border border-border-subtle bg-surface px-4 py-6 text-sm text-muted">
+      <p className="rounded-[var(--radius-card)] border border-dashed border-line-strong bg-surface px-4 py-10 text-center text-sm text-muted">
         Nothing is queued. Write a reply and use “Send later” to schedule one.
       </p>
     );
   }
 
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-2.5">
       {items.map((item) => (
         <ScheduledRow key={item.id} item={item} />
       ))}

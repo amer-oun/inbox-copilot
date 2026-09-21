@@ -340,7 +340,7 @@ Three things that catch people here:
   sensitive, so until the consent screen is verified the app stays in Testing — which
   limits it to listed test users and expires their refresh tokens after about a week. The
   app handles that correctly rather than silently: the mailbox goes to `needsReconnect`
-  and `/settings/accounts` says so. It still means reconnecting weekly until you either
+  and `/settings` says so. It still means reconnecting weekly until you either
   verify the app or accept that.
 
 ## 5. First run, in order

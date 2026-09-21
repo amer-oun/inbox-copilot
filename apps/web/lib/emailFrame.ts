@@ -75,14 +75,26 @@ export function restoreBlockedImages(html: string): string {
  * Deliberately minimal and unopinionated: an email brings its own design, and
  * restyling it is both rude and a way to make a phishing mail look native. This
  * only sets a readable default for bodies that specify nothing.
+ *
+ * **Light in both themes, on purpose.** This used to carry a
+ * `prefers-color-scheme: dark` block that flipped the body to a dark ground — and
+ * it could only ever have worked for the plain-text-ish minority of mail. A real
+ * email specifies its own colours inline: black text on cells it expects to be
+ * white, logos on transparent PNGs cut for a white page, `bgcolor="#ffffff"` on
+ * half a table. Darkening the ground *underneath* all that does not darken the
+ * email; it produces black-on-black paragraphs and white boxes floating in a dark
+ * frame, and every one of those failures looks like our rendering bug rather than
+ * the sender's design. `color-scheme: light` is part of it: without it the frame's
+ * form controls and scrollbars would still render dark inside a white document.
+ *
+ * The app around the frame is themed; the sender's content is not ours to re-light.
  */
 const FRAME_STYLES = `
-  :root { color-scheme: light dark; }
-  html, body { margin: 0; padding: 0; }
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; background: #ffffff; }
   body {
     font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #1c1f26;
-    background: #ffffff;
     padding: 16px;
     overflow-wrap: break-word;
     word-break: break-word;
@@ -95,11 +107,6 @@ const FRAME_STYLES = `
     padding-left: 12px;
     border-left: 2px solid #d8dbe3;
     color: #555b69;
-  }
-  @media (prefers-color-scheme: dark) {
-    body { color: #e8eaf0; background: #16181d; }
-    a { color: #8fb0ff; }
-    blockquote { border-left-color: #3a3f4b; color: #a6acbb; }
   }
 `;
 

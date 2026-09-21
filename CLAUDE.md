@@ -817,7 +817,62 @@ sender's markup, and model output has no business borrowing it. `targetLang` fal
 because guessing which language somebody reads is not a default anyone should pick for
 them.
 
+## The web app's shell and themes
+
+Every signed-in route is in `apps/web/app/(app)/`, whose layout renders `AppShell`:
+sidebar at `lg`, top bar plus bottom tab bar below it. One definition, because per-page
+chrome drifts into a screen with no way out of it. `AppShell` is a server component; the
+only client pieces are `AppNav` (it needs `usePathname`) and `ThemeToggle`.
+
+There is no `/dashboard`. It sat between sign-in and the inbox showing the session and
+the mailbox list, which is not what anyone opens an email client for; both moved to
+`/settings`, which is where people look when something is wrong. `/settings/accounts`
+survives as a redirect that carries the query string — **the API's OAuth callback builds
+that URL** (`routes/oauth.ts`), so removing it would end every successful mailbox
+connect on a 404.
+
+**`@theme` cannot be nested in an at-rule.** Tailwind v4 hoists it to `:root`, and this
+file used to carry `@media (prefers-color-scheme: dark) { @theme { … } }` — which
+compiled to one flat block where the dark values came last and won. Every reader got the
+dark palette whatever their device said, and the light theme had never once rendered.
+So the palette is ordinary custom properties on three selectors (`:root`, the media
+query guarded by `:not([data-theme="light"])`, then `:root[data-theme="dark"]`) and
+`@theme inline` only maps them to Tailwind's names. Without `inline`, `bg-surface` bakes
+the value in at build time and every selector below it does nothing. `lib/theme.test.ts`
+reads `globals.css` and fails on the old shape.
+
+Three theme states, not two: system is the default and a real choice. The inline script
+in `<head>` (`lib/theme.ts`) sets `data-theme` before first paint; `ThemeToggle` reads
+the same key through `useSyncExternalStore`, so two toggles on one page and a second tab
+all agree.
+
+**Email bodies stay light in both themes.** Senders write inline colours for a white
+page — black text on cells they expect to be white, `bgcolor="#ffffff"`, logos cut on
+transparent PNGs. Darkening the ground underneath produces black-on-black paragraphs and
+white boxes floating in a dark frame, and every one of those reads as our rendering bug.
+`emailFrame.ts` therefore declares `color-scheme: light` and a white body, and
+`emailFrame.test.ts` asserts it carries no `prefers-color-scheme` of its own.
+
+Priority in the thread list is a **worded chip on URGENT and HIGH only**. It used to be a
+colour bar on every row, which is colour alone doing the work and, being present
+everywhere, distinguishing nothing.
+
 ## Current phase
+> UI redesign (this pass, nothing committed): an app shell over every signed-in route,
+> light/dark themes that actually work, and a visual pass over the inbox, thread,
+> composer, scheduled, follow-ups, settings and sign-in. Read "The web app's shell and
+> themes" above first. `/dashboard` is gone and `/settings` absorbed it;
+> `/settings/accounts` is a redirect the API's OAuth callback still depends on.
+> Verified: typecheck 6/6, lint 5/5, 1319 tests (1245 api + 74 web), a clean
+> `next build` listing the twelve expected routes, Prettier clean, and both pages
+> screenshotted in both themes at 1280px and at 390×844 through a headless-Chrome
+> harness that renders the real components with fixture DTOs. Every text/background pair
+> in both palettes was computed against WCAG AA (58 pairs, all ≥ 4.5:1, indicators
+> ≥ 3:1) rather than eyeballed. Found while doing it: the previous dark theme had never
+> been conditional — `@theme` nested in a media query is hoisted, so every user had been
+> getting the dark palette. Not verified: a real browser session against live data (the
+> harness renders fixtures), and any of this on a real phone.
+>
 > Phase 10 — Scheduling, follow-ups and translation: DONE. `services/schedule.ts` +
 > `lib/timezone.ts` (scheduled send and the sweeper), `services/followUps.ts` +
 > `services/digest.ts` + `lib/resend.ts` (reminders and the opt-in digest),

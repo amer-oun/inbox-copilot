@@ -73,13 +73,15 @@ function FollowUpRow({ item }: { item: FollowUpReminderDto }) {
   const busy = dismiss.isPending || snooze.isPending;
 
   return (
-    <li className="rounded-card border border-border-subtle bg-surface px-4 py-3">
+    <li className="rounded-[var(--radius-card)] border border-line bg-surface px-4 py-3.5 shadow-raise">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <BellRing aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
-        <span className="text-sm font-semibold text-ink">
+        <span className="min-w-0 truncate text-sm font-semibold text-ink">
           {item.subject ?? item.reason ?? "(no subject)"}
         </span>
-        <span className="ml-auto text-xs text-muted">{waitingFor(item.createdAt)}</span>
+        <span className="ml-auto shrink-0 text-xs text-muted">
+          {waitingFor(item.createdAt)}
+        </span>
       </div>
 
       {item.recipients.length > 0 && (
@@ -93,7 +95,7 @@ function FollowUpRow({ item }: { item: FollowUpReminderDto }) {
         take it on trust. "Nothing inbound on this thread" is the literal condition the
         check job uses (services/followUps.ts), stated in the same words.
       */}
-      <p className="mt-2 text-sm text-ink">
+      <p className="mt-2 max-w-[70ch] text-[0.8125rem] leading-relaxed text-ink">
         Nothing has arrived on this thread since you sent it. If somebody replied
         elsewhere, mark it handled.
       </p>
@@ -101,7 +103,7 @@ function FollowUpRow({ item }: { item: FollowUpReminderDto }) {
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Link
           href={`/thread/${item.threadId}`}
-          className="text-xs text-muted underline hover:text-ink"
+          className="text-xs font-medium text-accent underline underline-offset-2 hover:no-underline"
         >
           Open the thread
         </Link>
@@ -117,7 +119,7 @@ function FollowUpRow({ item }: { item: FollowUpReminderDto }) {
             {snooze.isPending ? (
               <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
             ) : (
-              <Clock aria-hidden="true" className="size-3.5" />
+              <Clock aria-hidden="true" />
             )}
             Not yet
           </Button>
@@ -130,7 +132,7 @@ function FollowUpRow({ item }: { item: FollowUpReminderDto }) {
             {dismiss.isPending ? (
               <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
             ) : (
-              <Check aria-hidden="true" className="size-3.5" />
+              <Check aria-hidden="true" />
             )}
             Handled
           </Button>
@@ -149,7 +151,7 @@ function FollowUpRow({ item }: { item: FollowUpReminderDto }) {
 export function FollowUpList({ items }: { items: FollowUpReminderDto[] }) {
   if (items.length === 0) {
     return (
-      <p className="rounded-card border border-border-subtle bg-surface px-4 py-6 text-sm text-muted">
+      <p className="rounded-[var(--radius-card)] border border-dashed border-line-strong bg-surface px-4 py-10 text-center text-sm text-muted">
         Nothing is waiting on a reply. Tick “remind me if nobody replies” in the composer
         to start watching a thread.
       </p>
@@ -157,7 +159,7 @@ export function FollowUpList({ items }: { items: FollowUpReminderDto[] }) {
   }
 
   return (
-    <ul className="space-y-3">
+    <ul className="space-y-2.5">
       {items.map((item) => (
         <FollowUpRow key={item.id} item={item} />
       ))}

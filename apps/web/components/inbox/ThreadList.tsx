@@ -45,6 +45,30 @@ export interface ThreadListProps {
   initialPage: ThreadListDto;
 }
 
+/**
+ * The empty state teaches the interface rather than announcing the obvious. Which
+ * sentence depends on *why* it is empty: an unfiltered inbox with nothing in it
+ * means no mailbox has finished syncing, which is something the reader can act
+ * on; an empty category just means the classifier has not put anything there.
+ */
+function EmptyInbox({ category }: { category: ThreadCategoryFilter }) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-6 py-20 text-center">
+      <span className="mb-1 flex size-11 items-center justify-center rounded-full bg-panel text-muted">
+        <Inbox aria-hidden="true" className="size-5" />
+      </span>
+      <p className="text-sm font-semibold text-ink">
+        {category === "ALL" ? "No mail yet" : "Nothing in this category"}
+      </p>
+      <p className="max-w-[42ch] text-[0.8125rem] leading-relaxed text-muted">
+        {category === "ALL"
+          ? "Connect a mailbox in Settings and the first sync brings in the last 90 days. Threads appear here as they arrive."
+          : "Categories are assigned by the classifier as mail is enriched. Nothing has been filed here yet."}
+      </p>
+    </div>
+  );
+}
+
 export function ThreadList({ category, initialPage }: ThreadListProps) {
   const query = useInfiniteQuery({
     // The category is part of the key: switching tabs must not show the old list.
@@ -57,49 +81,38 @@ export function ThreadList({ category, initialPage }: ThreadListProps) {
 
   const threads = query.data.pages.flatMap((page) => page.items);
 
-  if (threads.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-        <Inbox aria-hidden="true" className="size-8 text-muted" />
-        <p className="text-sm font-medium text-ink">Nothing here yet</p>
-        <p className="max-w-sm text-sm text-muted">
-          {category === "ALL"
-            ? "Once a mailbox has finished syncing, its threads appear here."
-            : "No threads have been filed under this category yet."}
-        </p>
-      </div>
-    );
-  }
+  if (threads.length === 0) return <EmptyInbox category={category} />;
 
   return (
     <div>
-      <ul className="divide-y divide-border-subtle">
+      <ul className="divide-y divide-line border-b border-line">
         {threads.map((thread) => (
           <ThreadRow key={thread.id} thread={thread} />
         ))}
       </ul>
 
-      <div className="flex items-center justify-center px-4 py-6" aria-live="polite">
+      <div className="flex items-center justify-center px-4 py-8" aria-live="polite">
         {query.hasNextPage ? (
           <Button
             variant="outline"
+            size="sm"
             onClick={() => void query.fetchNextPage()}
             disabled={query.isFetchingNextPage}
           >
             {query.isFetchingNextPage && (
-              <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+              <Loader2 aria-hidden="true" className="animate-spin" />
             )}
             {query.isFetchingNextPage ? "Loading…" : "Load more"}
           </Button>
         ) : (
-          <p className="text-xs text-muted">
+          <p className="text-xs text-faint">
             {`${threads.length} thread${threads.length === 1 ? "" : "s"}`}
           </p>
         )}
       </div>
 
       {query.isError && (
-        <p role="alert" className="px-4 pb-6 text-sm text-danger">
+        <p role="alert" className="px-4 pb-6 text-sm text-danger sm:px-6">
           Could not load more threads. Try again.
         </p>
       )}

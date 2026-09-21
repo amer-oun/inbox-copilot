@@ -94,7 +94,7 @@ export function TranslateControl({ messageId, defaultLang }: TranslateControlPro
   const stale = translation !== null && translation.targetLang !== lang;
 
   return (
-    <div className="border-t border-border-subtle px-4 py-3">
+    <div className="border-t border-line bg-panel/50 px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <Languages aria-hidden="true" className="size-3.5 text-muted" />
         <label htmlFor={`translate-${messageId}`} className="text-xs text-muted">
@@ -104,7 +104,7 @@ export function TranslateControl({ messageId, defaultLang }: TranslateControlPro
           id={`translate-${messageId}`}
           value={lang}
           onChange={(event) => setLang(event.target.value)}
-          className="h-8 rounded-lg border border-border-subtle bg-canvas px-2 text-xs text-ink"
+          className="h-8 rounded-[var(--radius-control)] border border-line-strong bg-surface px-2 text-xs text-ink transition-colors hover:bg-raised"
         >
           {options.map((option) => (
             <option key={option.code} value={option.code}>
@@ -120,9 +120,9 @@ export function TranslateControl({ messageId, defaultLang }: TranslateControlPro
           disabled={translate.isPending}
         >
           {translate.isPending ? (
-            <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+            <Loader2 aria-hidden="true" className="animate-spin" />
           ) : (
-            <Languages aria-hidden="true" className="size-3.5" />
+            <Languages aria-hidden="true" />
           )}
           {translation === null || stale ? "Translate" : "Retranslate"}
         </Button>
@@ -145,9 +145,9 @@ export function TranslateControl({ messageId, defaultLang }: TranslateControlPro
       {translation !== null && !stale && (
         <section
           aria-label={`Translation to ${translation.targetLang}`}
-          className="mt-3 rounded-lg border border-border-subtle bg-canvas px-3 py-2"
+          className="mt-3 rounded-[var(--radius-control)] border border-line bg-surface px-3.5 py-3"
         >
-          <p className="text-xs text-muted">
+          <p className="max-w-[74ch] text-xs leading-relaxed text-muted">
             <span className="sr-only">AI-generated: </span>
             {`Machine translation${
               translation.sourceLang === null ? "" : ` from ${translation.sourceLang}`
@@ -158,7 +158,7 @@ export function TranslateControl({ messageId, defaultLang }: TranslateControlPro
             paragraphs the prompt asked the model to keep. Never HTML: the sandboxing
             stack downstairs is for the sender's markup, not for model output.
           */}
-          <p className="mt-2 whitespace-pre-wrap text-sm text-ink">
+          <p className="mt-2 max-w-[74ch] whitespace-pre-wrap text-sm leading-relaxed text-ink">
             {translation.translatedText}
           </p>
         </section>

@@ -9,37 +9,42 @@ import { cn } from "../../lib/utils";
  * No `"use client"`: a row is a link and some text. It is rendered inside a client
  * component (the infinite list) but needs no interactivity of its own, so it stays
  * a plain function that React can render on either side.
+ *
+ * ── How priority is shown, and why it changed ───────────────────────────────────
+ *
+ * This used to be a coloured bar down the left edge of every row. That reads as a
+ * decorative stripe rather than as data, it fires on all four levels so it is
+ * present on every row and therefore distinguishes nothing, and colour was doing
+ * the work on its own.
+ *
+ * Now: only the two levels a person would act on say anything at all. URGENT and
+ * HIGH get a small **worded** chip beside the subject — "Urgent", "High" — which
+ * is legible without colour vision and, more importantly, is *absent* from the
+ * other rows. A signal on every row is not a signal. NORMAL and LOW are conveyed
+ * by their own ordinary weight, which is the honest rendering of "nothing
+ * special".
+ *
+ * Unread is the one thing that keeps a mark of its own: a filled dot in the
+ * gutter, plus the sender in semibold, plus the word in the accessible label.
  */
 
-/**
- * The priority indicator.
- *
- * A coloured bar rather than a number: the score is a model's guess and showing
- * "72" invites a precision it does not have. The bar is also the one thing that
- * must survive a colour-blind reader, so priority is in the `title`/`aria-label`
- * as words too, and URGENT additionally carries weight in the subject.
- */
-const PRIORITY_STYLES: Record<Priority, { bar: string; label: string }> = {
-  URGENT: { bar: "bg-danger", label: "Urgent" },
-  HIGH: { bar: "bg-warning", label: "High priority" },
-  NORMAL: { bar: "bg-accent/40", label: "Normal priority" },
-  LOW: { bar: "bg-border-subtle", label: "Low priority" },
+const PRIORITY_CHIP: Partial<Record<Priority, { label: string; className: string }>> = {
+  URGENT: {
+    label: "Urgent",
+    className: "bg-danger text-surface",
+  },
+  HIGH: {
+    label: "High",
+    className: "bg-warning-soft text-warning border border-warning-line",
+  },
 };
 
-function PriorityBar({ priority }: { priority: Priority | null }) {
-  const style = priority === null ? null : PRIORITY_STYLES[priority];
-
-  return (
-    <span
-      aria-hidden="true"
-      title={style?.label ?? "Not yet prioritised"}
-      className={cn(
-        "mt-1 h-10 w-1 shrink-0 rounded-full",
-        style?.bar ?? "bg-border-subtle/40",
-      )}
-    />
-  );
-}
+const PRIORITY_LABEL: Record<Priority, string> = {
+  URGENT: "Urgent",
+  HIGH: "High priority",
+  NORMAL: "Normal priority",
+  LOW: "Low priority",
+};
 
 /** Dates in a mail list: time today, weekday this week, otherwise a date. */
 function formatWhen(iso: string, now: Date = new Date()): string {
@@ -65,37 +70,52 @@ function formatWhen(iso: string, now: Date = new Date()): string {
 export function ThreadRow({ thread }: { thread: ThreadListItemDto }) {
   const senderName = thread.from?.name ?? thread.from?.email ?? "(unknown sender)";
   const priorityLabel =
-    thread.priority === null
-      ? "Not yet prioritised"
-      : PRIORITY_STYLES[thread.priority].label;
+    thread.priority === null ? "Not yet prioritised" : PRIORITY_LABEL[thread.priority];
+  const chip = thread.priority === null ? undefined : PRIORITY_CHIP[thread.priority];
+  const flagged = thread.threatLevel !== "UNKNOWN" && thread.threatLevel !== "SAFE";
 
   return (
-    <li className="border-b border-border-subtle last:border-b-0">
+    <li>
       <Link
         href={`/thread/${thread.id}`}
-        className="flex gap-3 px-4 py-3 transition-colors hover:bg-canvas focus-visible:bg-canvas"
+        className={cn(
+          "group flex gap-3 px-4 py-3 transition-colors duration-150 sm:px-6",
+          "ease-[var(--ease-out-quart)] hover:bg-raised focus-visible:bg-raised",
+          !thread.isRead && "bg-surface",
+        )}
         // Read by a screen reader before the visual details below it.
         aria-label={`${senderName}: ${thread.subject ?? "(no subject)"}. ${priorityLabel}.${
           thread.isRead ? "" : " Unread."
-        }`}
+        }${flagged ? " Flagged as suspicious." : ""}`}
       >
-        <PriorityBar priority={thread.priority} />
+        {/*
+          The unread gutter. A fixed-width column rather than a conditional
+          element, so every subject in the list starts on the same x — a ragged
+          left edge is what makes a mail list tiring to scan.
+        */}
+        <span aria-hidden="true" className="mt-[0.4375rem] w-2 shrink-0">
+          {thread.isRead ? null : (
+            <span className="block size-2 rounded-full bg-accent" />
+          )}
+        </span>
 
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span
               className={cn(
-                "truncate text-sm",
+                "truncate text-[0.8125rem]",
                 thread.isRead ? "text-muted" : "font-semibold text-ink",
               )}
             >
               {senderName}
             </span>
             {thread.messageCount > 1 && (
-              <span className="shrink-0 text-xs text-muted">{thread.messageCount}</span>
+              <span className="shrink-0 text-xs tabular-nums text-faint">
+                {thread.messageCount}
+              </span>
             )}
-            <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted">
-              {thread.threatLevel !== "UNKNOWN" && thread.threatLevel !== "SAFE" && (
+            <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-faint">
+              {flagged && (
                 <ShieldAlert
                   aria-label="Flagged as suspicious"
                   className="size-3.5 text-danger"
@@ -107,20 +127,31 @@ export function ThreadRow({ thread }: { thread: ThreadListItemDto }) {
               {thread.hasAttachments && (
                 <Paperclip aria-label="Has attachments" className="size-3.5" />
               )}
-              <time dateTime={thread.lastMessageAt}>
+              <time dateTime={thread.lastMessageAt} className="tabular-nums">
                 {formatWhen(thread.lastMessageAt)}
               </time>
             </span>
           </span>
 
-          <span
-            className={cn(
-              "mt-0.5 block truncate text-sm",
-              thread.isRead ? "text-muted" : "text-ink",
-              thread.priority === "URGENT" && "font-medium",
+          <span className="mt-1 flex items-center gap-2">
+            {chip === undefined ? null : (
+              <span
+                className={cn(
+                  "shrink-0 rounded px-1.5 py-px text-[0.6875rem] font-semibold leading-4",
+                  chip.className,
+                )}
+              >
+                {chip.label}
+              </span>
             )}
-          >
-            {thread.subject ?? "(no subject)"}
+            <span
+              className={cn(
+                "truncate text-sm",
+                thread.isRead ? "text-muted" : "font-medium text-ink",
+              )}
+            >
+              {thread.subject ?? "(no subject)"}
+            </span>
           </span>
 
           {/*
@@ -129,11 +160,11 @@ export function ThreadRow({ thread }: { thread: ThreadListItemDto }) {
             marks it as generated — a reader should always know which it is.
           */}
           {thread.summaryHeadline === null ? (
-            <span className="mt-0.5 block truncate text-xs text-muted">
+            <span className="mt-0.5 block truncate text-[0.8125rem] text-faint">
               {thread.snippet ?? ""}
             </span>
           ) : (
-            <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+            <span className="mt-0.5 flex items-center gap-1.5 text-[0.8125rem] text-faint">
               <Sparkles aria-hidden="true" className="size-3 shrink-0 text-accent" />
               <span className="truncate">
                 <span className="sr-only">AI summary: </span>

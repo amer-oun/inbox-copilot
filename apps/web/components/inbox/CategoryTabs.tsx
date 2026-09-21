@@ -7,8 +7,14 @@ import { cn } from "../../lib/utils";
  * needs no JavaScript to work — each tab is a real URL that can be bookmarked,
  * opened in a new tab, and rendered on the server.
  *
- * The tabs are driven by the `Category` enum, so a category added to the schema
- * appears here without anyone remembering to add it.
+ * Pills rather than an underline rule. Twelve underlined tabs in a horizontally
+ * scrolling strip give the eye nothing to land on until it reaches the active
+ * one; a filled pill is findable at a glance mid-scroll, which is the whole job
+ * of this control. The active pill also carries an accent *fill* rather than only
+ * accent text, so it survives being scrolled half off the edge.
+ *
+ * `scroll-mx` plus `snap-start` means tapping a tab on a phone brings it fully
+ * into view rather than leaving it clipped against the gutter.
  */
 
 /** Order is editorial: what a person checks first, not alphabetical. */
@@ -29,21 +35,27 @@ export const CATEGORY_TABS: { value: ThreadCategoryFilter; label: string }[] = [
 
 export function CategoryTabs({ active }: { active: ThreadCategoryFilter }) {
   return (
-    <nav aria-label="Categories" className="border-b border-border-subtle">
-      {/* Scrolls rather than wraps: twelve tabs must not become three rows on a phone. */}
-      <ul className="flex gap-1 overflow-x-auto px-4 pb-px [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <nav aria-label="Categories">
+      {/* Scrolls rather than wraps: twelve tabs must not become three rows. */}
+      <ul
+        className={cn(
+          "flex snap-x gap-1 overflow-x-auto pb-3",
+          "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+        )}
+      >
         {CATEGORY_TABS.map((tab) => {
           const isActive = tab.value === active;
           return (
-            <li key={tab.value} className="shrink-0">
+            <li key={tab.value} className="shrink-0 snap-start scroll-mx-4">
               <Link
                 href={`/inbox/${tab.value.toLowerCase()}`}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "-mb-px inline-flex items-center border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+                  "inline-flex items-center rounded-full px-3 py-1.5 text-[0.8125rem] font-medium",
+                  "transition-colors duration-150 ease-[var(--ease-out-quart)]",
                   isActive
-                    ? "border-accent text-accent"
-                    : "border-transparent text-muted hover:border-border-subtle hover:text-ink",
+                    ? "bg-accent text-accent-ink"
+                    : "text-muted hover:bg-raised hover:text-ink",
                 )}
               >
                 {tab.label}

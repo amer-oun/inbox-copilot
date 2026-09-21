@@ -1,52 +1,289 @@
 @import "tailwindcss";
 
 /*
- * Tailwind v4: tokens are CSS variables registered with @theme, so they are
- * available as utilities (bg-surface, text-muted, …). Tailwind only — no CSS
- * modules, no styled-components.
+ * Tokens, themes and the handful of base rules.
+ *
+ * ── Why the palette is plain custom properties and not `@theme` ──────────────────
+ *
+ * Tailwind v4 **hoists `@theme` out of any at-rule it is nested in**. This file used
+ * to carry `@media (prefers-color-scheme: dark) { @theme { … } }`, which compiled to
+ * one flat `:root` block where the dark values simply came last and won — so every
+ * reader got the dark palette whatever their device said, and the light theme had
+ * never actually rendered. Verified by compiling this file: the output contained no
+ * `prefers-color-scheme` at all.
+ *
+ * So the palette lives in ordinary custom properties, which cascade the way CSS
+ * promises, and `@theme inline` only *maps* them to Tailwind's names. `inline` is
+ * load-bearing: without it `bg-surface` would bake in the value at build time
+ * instead of emitting `var(--surface)`, and re-theming under a selector would do
+ * nothing.
+ *
+ * ── The three selectors, in this order ──────────────────────────────────────────
+ *
+ *   :root                                   light, the default
+ *   @media dark  :root:not([data-theme=light])   the device setting
+ *   :root[data-theme="dark"]                     an explicit choice
+ *
+ * The `:not()` is what lets "light" beat a dark device setting, and the explicit
+ * block last is what lets "dark" beat a light one. No colour is defined *only*
+ * inside a media query, so a browser that reports nothing still gets a full palette.
+ *
+ * Every text/background pair below is verified against WCAG AA in both themes —
+ * body text ≥ 4.5:1, large text and indicators ≥ 3:1.
  */
 
-@theme {
-  --color-canvas: oklch(99% 0.004 260);
-  --color-surface: oklch(100% 0 0);
-  --color-border-subtle: oklch(92% 0.006 260);
-  --color-ink: oklch(24% 0.02 265);
-  --color-muted: oklch(52% 0.015 265);
-  --color-accent: oklch(52% 0.18 262);
-  --color-accent-ink: oklch(99% 0.005 262);
-  --color-danger: oklch(54% 0.19 25);
-  --color-warning: oklch(62% 0.14 75);
-  --color-success: oklch(56% 0.13 150);
+:root {
+  color-scheme: light;
 
-  --radius-card: 0.875rem;
+  /* Surfaces, coolest to warmest in depth order. */
+  --canvas: oklch(98.2% 0.003 265); /* the page behind everything */
+  --surface: oklch(100% 0 0); /* rows, cards, the reading column */
+  --panel: oklch(96.8% 0.004 265); /* the second neutral: nav, toolbars */
+  --raised: oklch(95.5% 0.005 265); /* hover and selection */
+
+  /*
+   * Text, three steps — and all three are held to 4.5:1, including `faint`. A
+   * third step exists to create hierarchy, not to license unreadable grey: the
+   * snippet under a subject line is text people actually read.
+   */
+  --ink: oklch(24% 0.022 265);
+  --muted: oklch(47.4% 0.017 265);
+  --faint: oklch(53.2% 0.016 265);
+
+  --line: oklch(91.2% 0.006 265); /* hairlines between rows */
+  --line-strong: oklch(86% 0.008 265); /* control borders, which must be seen */
+
+  /* One accent. Primary actions, current selection, focus — never decoration. */
+  --accent: oklch(52% 0.17 262);
+  --accent-ink: oklch(99% 0.005 262);
+  --accent-soft: oklch(94.8% 0.028 262);
+  --accent-line: oklch(88% 0.055 262);
+
+  --danger: oklch(50.5% 0.196 25);
+  --danger-soft: oklch(95.5% 0.028 25);
+  --danger-line: oklch(87% 0.06 25);
+
+  --warning: oklch(50% 0.13 68);
+  --warning-soft: oklch(95.5% 0.035 80);
+  --warning-line: oklch(87% 0.07 80);
+
+  --success: oklch(47% 0.12 152);
+  --success-soft: oklch(95.5% 0.03 152);
+  --success-line: oklch(87% 0.06 152);
+
+  /*
+   * Shadows are light-theme only in effect: on a dark ground a drop shadow reads as
+   * dirt, and depth comes from the surface ramp instead.
+   */
+  --shadow-raise: 0 1px 2px oklch(24% 0.02 265 / 0.06);
+  --shadow-pop: 0 4px 12px oklch(24% 0.02 265 / 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
-  @theme {
-    --color-canvas: oklch(17% 0.015 265);
-    --color-surface: oklch(21% 0.018 265);
-    --color-border-subtle: oklch(30% 0.02 265);
-    --color-ink: oklch(96% 0.005 265);
-    --color-muted: oklch(72% 0.015 265);
-    --color-accent: oklch(70% 0.15 262);
-    --color-accent-ink: oklch(18% 0.02 262);
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --canvas: oklch(18.1% 0.012 265);
+    --surface: oklch(22.1% 0.014 265);
+    --panel: oklch(15.5% 0.011 265);
+    --raised: oklch(26.2% 0.015 265);
+
+    --ink: oklch(96.2% 0.004 265);
+    --muted: oklch(75.2% 0.014 265);
+    --faint: oklch(66% 0.014 265);
+
+    --line: oklch(29.5% 0.016 265);
+    --line-strong: oklch(37% 0.018 265);
+
+    --accent: oklch(73% 0.14 262);
+    --accent-ink: oklch(17% 0.03 262);
+    --accent-soft: oklch(30% 0.06 262);
+    --accent-line: oklch(40% 0.08 262);
+
+    --danger: oklch(73% 0.16 25);
+    --danger-soft: oklch(31% 0.07 25);
+    --danger-line: oklch(42% 0.1 25);
+
+    --warning: oklch(82% 0.14 78);
+    --warning-soft: oklch(32% 0.06 70);
+    --warning-line: oklch(43% 0.08 70);
+
+    --success: oklch(78% 0.14 152);
+    --success-soft: oklch(30% 0.06 152);
+    --success-line: oklch(41% 0.08 152);
+
+    --shadow-raise: none;
+    --shadow-pop: 0 4px 16px oklch(0% 0 0 / 0.4);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: oklch(18.1% 0.012 265);
+  --surface: oklch(22.1% 0.014 265);
+  --panel: oklch(15.5% 0.011 265);
+  --raised: oklch(26.2% 0.015 265);
+
+  --ink: oklch(96.2% 0.004 265);
+  --muted: oklch(75.2% 0.014 265);
+  --faint: oklch(66% 0.014 265);
+
+  --line: oklch(29.5% 0.016 265);
+  --line-strong: oklch(37% 0.018 265);
+
+  --accent: oklch(73% 0.14 262);
+  --accent-ink: oklch(17% 0.03 262);
+  --accent-soft: oklch(30% 0.06 262);
+  --accent-line: oklch(40% 0.08 262);
+
+  --danger: oklch(73% 0.16 25);
+  --danger-soft: oklch(31% 0.07 25);
+  --danger-line: oklch(42% 0.1 25);
+
+  --warning: oklch(82% 0.14 78);
+  --warning-soft: oklch(32% 0.06 70);
+  --warning-line: oklch(43% 0.08 70);
+
+  --success: oklch(78% 0.14 152);
+  --success-soft: oklch(30% 0.06 152);
+  --success-line: oklch(41% 0.08 152);
+
+  --shadow-raise: none;
+  --shadow-pop: 0 4px 16px oklch(0% 0 0 / 0.4);
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-line: var(--accent-line);
+
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-line: var(--warning-line);
+
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-success-line: var(--success-line);
+
+  /*
+   * Product radii: 10px for controls, 12px for panels. Anything rounder starts
+   * looking like a toy rather than a mail client.
+   */
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+
+  --shadow-raise: var(--shadow-raise);
+  --shadow-pop: var(--shadow-pop);
+
+  /* One family, five weights — a product UI does not need a display face. */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+
+  /*
+   * A semantic z scale. Named so that a new layer has somewhere to go other than
+   * `z-50` and, eventually, `z-9999`.
+   */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-nav: 20;
+  --z-overlay: 30;
+  --z-toast: 40;
+
+  /* Ease-out-quart. State changes finish fast; nothing here is choreography. */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 @layer base {
   html {
-    color-scheme: light dark;
+    /*
+     * Not `light dark`: `color-scheme` is set per theme block above, so an explicit
+     * choice also flips the browser's own widgets and scrollbars.
+     */
+    -webkit-tap-highlight-color: transparent;
   }
 
   body {
-    background-color: var(--color-canvas);
-    color: var(--color-ink);
+    background-color: var(--canvas);
+    color: var(--ink);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
-  /* Keyboard focus must stay visible everywhere. */
+  /* Keyboard focus must stay visible everywhere, on any surface. */
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* Headings set their own measure; prose gets a readable one where it is used. */
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  /*
+   * Form controls inherit the app's type rather than the platform's, so a `select`
+   * in the composer and the button beside it are the same size and family.
+   */
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::placeholder {
+    /* Placeholders are text and are held to the same 4.5:1 as any other text. */
+    color: var(--muted);
+    opacity: 1;
+  }
+}
+
+@layer utilities {
+  /*
+   * The email body's own ground. Senders design HTML for white, so the frame stays
+   * light in both themes — see components/thread/MessageBody.tsx. A dark frame does
+   * not make email dark, it makes email illegible.
+   */
+  .email-paper {
+    background-color: #ffffff;
+    color-scheme: light;
+  }
+}
+
+/*
+ * Reduced motion: transitions collapse rather than disappear, so a state change is
+ * still a change — it just arrives at once.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

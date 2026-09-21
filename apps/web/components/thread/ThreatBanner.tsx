@@ -11,6 +11,7 @@ import {
   type ThreatLevel,
 } from "@inbox-copilot/shared";
 import { Button } from "../ui/button";
+import { cn } from "../../lib/utils";
 
 /**
  * The threat banner (§6): the reasons, not just a score.
@@ -30,6 +31,14 @@ import { Button } from "../ui/button";
  *   - **appealed** — the user has said this is a false positive, so the alarm stands
  *     down to a note. The verdict itself is unchanged in the database on purpose (see
  *     `services/security/appeals.ts`); what changes is how loudly we say it.
+ *
+ * ── The visual grammar ──────────────────────────────────────────────────────────
+ *
+ * The three states are distinguished by *structure*, not only by colour, because
+ * colour alone would make the appealed state read as a weaker alarm rather than a
+ * different thing. Flagged gets a tinted field, a solid level chip and an icon in
+ * its own column; clean-with-findings is one line of muted text on the ordinary
+ * surface; appealed keeps the structure and drops the tint.
  */
 
 const LEVEL_COPY: Readonly<Record<ThreatLevel, { title: string; blurb: string }>> = {
@@ -119,23 +128,18 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
   if (!flagged) {
     if (threat.reasons.length === 0) return null;
     return (
-      <section className="rounded-card border border-border-subtle bg-surface px-3 py-2 text-xs text-muted">
-        <p className="flex items-start gap-2">
-          <ShieldCheck
-            aria-hidden="true"
-            className="mt-0.5 size-3.5 shrink-0 text-success"
-          />
-          <span>
-            {"Sender checks passed. Worth knowing: "}
-            {threat.reasons.join(" ")}
-          </span>
-        </p>
+      <section className="flex items-start gap-2 rounded-[var(--radius-card)] border border-line bg-surface px-3.5 py-2.5 text-[0.8125rem] leading-relaxed text-muted">
+        <ShieldCheck aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-success" />
+        <span>
+          <span className="font-medium text-ink">Sender checks passed.</span>{" "}
+          {threat.reasons.join(" ")}
+        </span>
       </section>
     );
   }
 
   const copy = LEVEL_COPY[threat.level];
-  const tone = threat.level === "PHISHING" ? "danger" : "warning";
+  const danger = threat.level === "PHISHING";
 
   return (
     <section
@@ -143,40 +147,51 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
       // appealed banner should not re-announce itself to a screen reader on every visit.
       {...(appealed ? {} : { role: "alert" })}
       aria-labelledby="threat-banner-heading"
-      className={
+      className={cn(
+        "overflow-hidden rounded-[var(--radius-card)] border",
         appealed
-          ? "rounded-card border border-border-subtle bg-surface px-4 py-3"
-          : tone === "danger"
-            ? "rounded-card border border-danger/40 bg-danger/10 px-4 py-3"
-            : "rounded-card border border-warning/40 bg-warning/10 px-4 py-3"
-      }
+          ? "border-line bg-surface"
+          : danger
+            ? "border-danger-line bg-danger-soft"
+            : "border-warning-line bg-warning-soft",
+      )}
     >
-      <div className="flex items-start gap-2">
-        {appealed ? (
-          <ShieldQuestion
-            aria-hidden="true"
-            className="mt-0.5 size-4 shrink-0 text-muted"
-          />
-        ) : (
-          <ShieldAlert
-            aria-hidden="true"
-            className={`mt-0.5 size-4 shrink-0 ${tone === "danger" ? "text-danger" : "text-warning"}`}
-          />
-        )}
+      <div className="flex gap-3 p-4">
+        <span
+          className={cn(
+            "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full",
+            appealed
+              ? "bg-panel text-muted"
+              : danger
+                ? "bg-danger text-surface"
+                : "bg-warning text-surface",
+          )}
+        >
+          {appealed ? (
+            <ShieldQuestion aria-hidden="true" className="size-4" />
+          ) : (
+            <ShieldAlert aria-hidden="true" className="size-4" />
+          )}
+        </span>
 
         <div className="min-w-0 flex-1">
           <h2
             id="threat-banner-heading"
-            className={`text-sm font-semibold ${
-              appealed ? "text-ink" : tone === "danger" ? "text-danger" : "text-warning"
-            }`}
+            className={cn(
+              "text-sm font-semibold",
+              appealed ? "text-ink" : danger ? "text-danger" : "text-warning",
+            )}
           >
             {appealed
               ? `You marked this as safe (we flagged it as ${threat.level.toLowerCase()})`
               : copy.title}
           </h2>
 
-          {!appealed && <p className="mt-1 text-sm text-ink">{copy.blurb}</p>}
+          {!appealed && (
+            <p className="mt-1 max-w-[70ch] text-[0.8125rem] leading-relaxed text-ink">
+              {copy.blurb}
+            </p>
+          )}
 
           {/*
             The evidence. Every item is one deterministic finding or the model's reading,
@@ -184,68 +199,90 @@ export function ThreatBanner({ threat }: ThreatBannerProps) {
             wording is part of what the rule *means* and it belongs next to the rule.
           */}
           {threat.reasons.length > 0 && (
-            <ul className="mt-2 space-y-1 text-sm text-ink">
+            <ul className="mt-3 space-y-1.5 text-[0.8125rem] leading-relaxed text-ink">
               {threat.reasons.map((reason) => (
-                <li key={reason} className="flex gap-2">
-                  <span aria-hidden="true" className="text-muted">
-                    •
-                  </span>
-                  <span>{reason}</span>
+                <li key={reason} className="flex gap-2.5">
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "mt-[0.4375rem] size-1.5 shrink-0 rounded-full",
+                      appealed ? "bg-muted" : danger ? "bg-danger" : "bg-warning",
+                    )}
+                  />
+                  <span className="max-w-[70ch]">{reason}</span>
                 </li>
               ))}
             </ul>
           )}
 
           {threat.explanation !== null && (
-            <p className="mt-2 text-sm text-ink">{threat.explanation}</p>
+            <p className="mt-3 max-w-[70ch] text-[0.8125rem] leading-relaxed text-ink">
+              {threat.explanation}
+            </p>
           )}
 
-          <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-            {threat.intent !== null && <span>{INTENT_COPY[threat.intent]}</span>}
+          <p className="mt-3 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+            {threat.intent !== null && (
+              <span className="font-medium">{INTENT_COPY[threat.intent]}</span>
+            )}
             {/*
               Both numbers, because they answer different questions: what the checks
               found on their own, and what the verdict became once the message had been
               read. Where they differ is exactly where the layering did something.
             */}
-            <span>{`Score ${threat.score}/100`}</span>
+            <span className="tabular-nums">{`Score ${threat.score}/100`}</span>
             {threat.ruleScore !== threat.score && (
-              <span>{`checks alone ${threat.ruleScore}/100`}</span>
+              <span className="tabular-nums">{`checks alone ${threat.ruleScore}/100`}</span>
             )}
             {threat.explanation === null && <span>Assessed by the checks only</span>}
           </p>
-
-          {appealed ? (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-              <Check aria-hidden="true" className="size-3.5" />
-              Recorded. The findings above are kept so we can tell how often we get this
-              wrong.
-            </p>
-          ) : (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => appeal.mutate()}
-                disabled={appeal.isPending}
-              >
-                {appeal.isPending ? (
-                  <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
-                ) : (
-                  <ShieldCheck aria-hidden="true" className="size-3.5" />
-                )}
-                This is safe
-              </Button>
-              <span className="text-xs text-muted">
-                Tells us we got it wrong. It does not change the sender or the links.
-              </span>
-            </div>
-          )}
-
-          {appeal.isError && (
-            <p className="mt-2 text-xs text-danger">{appeal.error.message}</p>
-          )}
         </div>
       </div>
+
+      {/* The action rail, separated so the evidence above it reads as evidence. */}
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-2.5",
+          appealed
+            ? "border-line bg-panel/60"
+            : danger
+              ? "border-danger-line/60"
+              : "border-warning-line/60",
+        )}
+      >
+        {appealed ? (
+          <p className="flex items-center gap-1.5 text-xs text-muted">
+            <Check aria-hidden="true" className="size-3.5" />
+            Recorded. The findings above are kept so we can tell how often we get this
+            wrong.
+          </p>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => appeal.mutate()}
+              disabled={appeal.isPending}
+            >
+              {appeal.isPending ? (
+                <Loader2 aria-hidden="true" className="animate-spin" />
+              ) : (
+                <ShieldCheck aria-hidden="true" />
+              )}
+              This is safe
+            </Button>
+            <span className="text-xs text-muted">
+              Tells us we got it wrong. It does not change the sender or the links.
+            </span>
+          </>
+        )}
+      </div>
+
+      {appeal.isError && (
+        <p className="border-t border-danger-line/60 px-4 py-2 text-xs text-danger">
+          {appeal.error.message}
+        </p>
+      )}
     </section>
   );
 }
