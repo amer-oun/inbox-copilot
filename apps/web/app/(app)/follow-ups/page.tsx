@@ -1,6 +1,7 @@
 import { followUpListSchema } from "@inbox-copilot/shared";
-import { apiFetch } from "../../../lib/apiClient";
-import { requireSession } from "../../../lib/session";
+import { apiFetch, isApiUnavailable } from "../../../lib/apiClient";
+import { requireViewer } from "../../../lib/viewer";
+import { StartingUp } from "../../../components/shell/StartingUp";
 import { FollowUpList } from "../../../components/followups/FollowUpList";
 import { PageBody, PageHeader } from "../../../components/shell/PageHeader";
 
@@ -15,9 +16,15 @@ import { PageBody, PageHeader } from "../../../components/shell/PageHeader";
 export const metadata = { title: "Follow-ups" };
 
 export default async function FollowUpsPage() {
-  const session = await requireSession("/follow-ups");
+  const viewer = await requireViewer("/follow-ups");
 
-  const { items } = await apiFetch(session.user.id, "/follow-ups", followUpListSchema);
+  let items;
+  try {
+    ({ items } = await apiFetch(viewer, "/follow-ups", followUpListSchema));
+  } catch (error) {
+    if (isApiUnavailable(error)) return <StartingUp />;
+    throw error;
+  }
 
   return (
     <>

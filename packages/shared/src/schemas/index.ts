@@ -1,5 +1,6 @@
 export * from "./ai.js";
 export * from "./common.js";
+export * from "./demo.js";
 export * from "./enums.js";
 export * from "./followUp.js";
 export * from "./health.js";

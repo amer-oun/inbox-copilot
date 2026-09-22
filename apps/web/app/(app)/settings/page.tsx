@@ -1,12 +1,21 @@
-import { CheckCircle2, LogOut, Mail, RefreshCw, ShieldAlert } from "lucide-react";
+import {
+  CheckCircle2,
+  FlaskConical,
+  Info,
+  LogOut,
+  Mail,
+  RefreshCw,
+  ShieldAlert,
+} from "lucide-react";
 import {
   mailAccountListSchema,
   syncStatusResponseSchema,
   type MailAccountDto,
   type SyncStatusResponse,
 } from "@inbox-copilot/shared";
-import { apiFetch } from "../../../lib/apiClient";
-import { requireSession } from "../../../lib/session";
+import { apiFetch, isApiUnavailable } from "../../../lib/apiClient";
+import { requireViewer, type Viewer } from "../../../lib/viewer";
+import { StartingUp } from "../../../components/shell/StartingUp";
 import { signOutAction } from "../../actions/auth";
 import {
   connectMailAccountAction,
@@ -67,6 +76,10 @@ const CALLBACK_ERRORS: Record<string, string> = {
   failed:
     "We could not finish connecting the mailbox. Nothing was saved — please try again.",
 };
+
+/** Not an OAuth outcome: a demo visitor pressed a mailbox button (actions/mailAccounts). */
+const DEMO_REFUSAL =
+  "The demo mailbox is sample data, so it cannot be connected, synced or disconnected.";
 
 const PROVIDER_LABEL = { GMAIL: "Gmail", OUTLOOK: "Outlook" } as const;
 
@@ -151,38 +164,95 @@ function SyncProgress({ status }: { status: SyncStatusResponse | undefined }) {
   );
 }
 
+/** Who is signed in, and how to leave. A demo visit says what it is instead. */
+function AccountCard({ viewer }: { viewer: Viewer }) {
+  const demo = viewer.kind === "demo";
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex items-center gap-3">
+          <Avatar name={viewer.name} email={viewer.email} className="size-10" />
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 truncate text-sm font-semibold text-ink">
+              {viewer.name ?? "Signed in"}
+              {demo ? (
+                <Badge tone="info" size="sm">
+                  Demo
+                </Badge>
+              ) : null}
+            </p>
+            <p className="truncate text-[0.8125rem] text-muted">{viewer.email ?? "—"}</p>
+          </div>
+        </div>
+
+        {demo ? (
+          <p className="mt-4 max-w-[70ch] border-t border-line pt-4 text-[0.8125rem] leading-relaxed text-muted">
+            A shared sample account. The people, companies and messages are invented, and
+            nothing here can send mail. What you change is put back for the next visitor.
+          </p>
+        ) : null}
+
+        <dl className="mt-4 grid gap-x-6 gap-y-1.5 border-t border-line pt-4 text-xs sm:grid-cols-[8rem_1fr]">
+          {demo ? null : (
+            <>
+              <dt className="text-muted">User id</dt>
+              <dd className="break-all font-mono text-ink">{viewer.userId}</dd>
+            </>
+          )}
+          <dt className="text-muted">{demo ? "Visit ends" : "Session expires"}</dt>
+          <dd className="text-ink">{new Date(viewer.expires).toLocaleString()}</dd>
+        </dl>
+      </CardContent>
+      <CardFooter>
+        <form action={signOutAction}>
+          <Button type="submit" variant="outline" size="sm">
+            <LogOut aria-hidden="true" />
+            {demo ? "Exit demo" : "Sign out"}
+          </Button>
+        </form>
+      </CardFooter>
+    </Card>
+  );
+}
+
 export default async function SettingsPage({ searchParams }: SettingsPageProps) {
-  const session = await requireSession("/settings");
-  const { user } = session;
+  const viewer = await requireViewer("/settings");
+  const demo = viewer.kind === "demo";
   const { connected, error, disconnected, sync } = await searchParams;
 
-  const { accounts } = await apiFetch(
-    session.user.id,
-    "/mail-accounts",
-    mailAccountListSchema,
-  );
+  let accounts: MailAccountDto[];
+  let syncStatuses: Map<string, SyncStatusResponse>;
+  try {
+    ({ accounts } = await apiFetch(viewer, "/mail-accounts", mailAccountListSchema));
 
-  // Sync state per mailbox, read alongside the accounts: this page answers "is it
-  // working", which the account row alone cannot say. The inbox itself is at /inbox.
-  const syncStatuses = new Map<string, SyncStatusResponse>(
-    await Promise.all(
-      accounts.map(
-        async (account) =>
-          [
-            account.id,
-            await apiFetch(
-              session.user.id,
-              `/mail-accounts/${account.id}/sync-status`,
-              syncStatusResponseSchema,
-            ),
-          ] as const,
+    // Sync state per mailbox, read alongside the accounts: this page answers "is it
+    // working", which the account row alone cannot say. The inbox itself is at /inbox.
+    syncStatuses = new Map<string, SyncStatusResponse>(
+      await Promise.all(
+        accounts.map(
+          async (account) =>
+            [
+              account.id,
+              await apiFetch(
+                viewer,
+                `/mail-accounts/${account.id}/sync-status`,
+                syncStatusResponseSchema,
+              ),
+            ] as const,
+        ),
       ),
-    ),
-  );
+    );
+  } catch (fetchError) {
+    if (isApiUnavailable(fetchError)) return <StartingUp />;
+    throw fetchError;
+  }
 
-  const errorMessage = error
-    ? (CALLBACK_ERRORS[error] ?? CALLBACK_ERRORS["failed"])
-    : null;
+  const errorMessage =
+    error === "demo"
+      ? null
+      : error
+        ? (CALLBACK_ERRORS[error] ?? CALLBACK_ERRORS["failed"])
+        : null;
   const needsReconnect = accounts.filter((account) => account.needsReconnect);
 
   return (
@@ -198,6 +268,7 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
           disconnected ||
           sync ||
           errorMessage ||
+          error === "demo" ||
           needsReconnect.length > 0) && (
           <div className="space-y-2.5">
             {connected ? (
@@ -240,6 +311,8 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
 
             {errorMessage ? <Notice tone="danger">{errorMessage}</Notice> : null}
 
+            {error === "demo" ? <Notice tone="info">{DEMO_REFUSAL}</Notice> : null}
+
             {needsReconnect.length > 0 ? (
               <Notice tone="danger">
                 {needsReconnect.length === 1
@@ -255,38 +328,13 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
         <section className="space-y-3">
           <SectionHeading
             title="Account"
-            description="The session the API authorizes every request against."
+            description={
+              demo
+                ? "This visit uses a shared demo account rather than a sign-in."
+                : "The session the API authorizes every request against."
+            }
           />
-          <Card>
-            <CardContent className="p-5">
-              <div className="flex items-center gap-3">
-                <Avatar name={user.name} email={user.email} className="size-10" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-ink">
-                    {user.name ?? "Signed in"}
-                  </p>
-                  <p className="truncate text-[0.8125rem] text-muted">
-                    {user.email ?? "—"}
-                  </p>
-                </div>
-              </div>
-
-              <dl className="mt-4 grid gap-x-6 gap-y-1.5 border-t border-line pt-4 text-xs sm:grid-cols-[8rem_1fr]">
-                <dt className="text-muted">User id</dt>
-                <dd className="break-all font-mono text-ink">{user.id}</dd>
-                <dt className="text-muted">Session expires</dt>
-                <dd className="text-ink">{new Date(session.expires).toLocaleString()}</dd>
-              </dl>
-            </CardContent>
-            <CardFooter>
-              <form action={signOutAction}>
-                <Button type="submit" variant="outline" size="sm">
-                  <LogOut aria-hidden="true" />
-                  Sign out
-                </Button>
-              </form>
-            </CardFooter>
-          </Card>
+          <AccountCard viewer={viewer} />
         </section>
 
         {/* ── Appearance ────────────────────────────────────────────────── */}
@@ -335,12 +383,27 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                         {account.displayName ? ` · ${account.displayName}` : ""}
                       </CardDescription>
                     </div>
-                    <Badge tone={statusTone(account)}>
-                      {account.needsReconnect ? "Reconnect needed" : account.syncStatus}
-                    </Badge>
+                    {demo ? (
+                      <Badge tone="info">Sample data</Badge>
+                    ) : (
+                      <Badge tone={statusTone(account)}>
+                        {account.needsReconnect ? "Reconnect needed" : account.syncStatus}
+                      </Badge>
+                    )}
                   </CardHeader>
 
                   <CardContent className="space-y-3">
+                    {demo ? (
+                      <p className="flex max-w-[70ch] items-start gap-2 text-[0.8125rem] leading-relaxed text-muted">
+                        <FlaskConical
+                          aria-hidden="true"
+                          className="mt-0.5 size-4 shrink-0 text-accent"
+                        />
+                        Invented mail for the demo, with the AI results written in
+                        advance. It is not connected to Gmail, never syncs, and nothing
+                        can be sent from it.
+                      </p>
+                    ) : null}
                     {account.needsReconnect ? (
                       <p className="max-w-[70ch] text-[0.8125rem] leading-relaxed text-danger">
                         Access was revoked or expired, so sync has stopped. Reconnecting
@@ -350,41 +413,49 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                     <SyncProgress status={syncStatuses.get(account.id)} />
                   </CardContent>
 
-                  <CardFooter className="flex-wrap justify-between gap-y-2">
-                    <p className="text-xs text-muted">
-                      {account.scopes.length} scope
-                      {account.scopes.length === 1 ? "" : "s"} granted
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {account.needsReconnect ? null : (
-                        <form action={syncMailAccountAction}>
+                  {demo ? null : (
+                    <CardFooter className="flex-wrap justify-between gap-y-2">
+                      <p className="text-xs text-muted">
+                        {account.scopes.length} scope
+                        {account.scopes.length === 1 ? "" : "s"} granted
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {account.needsReconnect ? null : (
+                          <form action={syncMailAccountAction}>
+                            <input
+                              type="hidden"
+                              name="mailAccountId"
+                              value={account.id}
+                            />
+                            <Button type="submit" variant="outline" size="sm">
+                              <RefreshCw aria-hidden="true" />
+                              Sync now
+                            </Button>
+                          </form>
+                        )}
+                        {account.needsReconnect ? (
+                          <form action={connectMailAccountAction}>
+                            <input
+                              type="hidden"
+                              name="provider"
+                              value={
+                                account.provider === "GMAIL" ? "google" : "microsoft"
+                              }
+                            />
+                            <Button type="submit" size="sm">
+                              Reconnect
+                            </Button>
+                          </form>
+                        ) : null}
+                        <form action={disconnectMailAccountAction}>
                           <input type="hidden" name="mailAccountId" value={account.id} />
-                          <Button type="submit" variant="outline" size="sm">
-                            <RefreshCw aria-hidden="true" />
-                            Sync now
+                          <Button type="submit" variant="danger" size="sm">
+                            Disconnect
                           </Button>
                         </form>
-                      )}
-                      {account.needsReconnect ? (
-                        <form action={connectMailAccountAction}>
-                          <input
-                            type="hidden"
-                            name="provider"
-                            value={account.provider === "GMAIL" ? "google" : "microsoft"}
-                          />
-                          <Button type="submit" size="sm">
-                            Reconnect
-                          </Button>
-                        </form>
-                      ) : null}
-                      <form action={disconnectMailAccountAction}>
-                        <input type="hidden" name="mailAccountId" value={account.id} />
-                        <Button type="submit" variant="danger" size="sm">
-                          Disconnect
-                        </Button>
-                      </form>
-                    </div>
-                  </CardFooter>
+                      </div>
+                    </CardFooter>
+                  )}
                 </Card>
               ))}
             </div>
@@ -398,26 +469,49 @@ export default async function SettingsPage({ searchParams }: SettingsPageProps) 
                 sync can run while you are away. Outlook is not available yet.
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex flex-wrap items-center gap-3">
-              <form action={connectMailAccountAction}>
-                <input type="hidden" name="provider" value="google" />
-                <Button type="submit" variant="outline">
-                  Connect Gmail
-                </Button>
-              </form>
+            <CardContent className="space-y-3">
               {/*
-               * Outlook has no sync implementation behind the provider port, so the OAuth
-               * flow would complete, store a grant, and then fail in the worker — leaving a
-               * connected mailbox that never brings mail in and an access grant the user has
-               * to go and revoke. Refusing at the button is the honest version of that.
-               * The badge sits beside it rather than in a tooltip: a disabled button is not
-               * focusable, so an explanation only it carries is one a keyboard user never
-               * hears.
+               * Said here, before the click, rather than left to Google's own "access
+               * blocked" page: while the app is in Google's review, only accounts added
+               * as test users can grant Gmail access.
                */}
-              <Button type="button" variant="outline" disabled>
-                Connect Outlook
-              </Button>
-              <Badge tone="neutral">Coming soon</Badge>
+              <p className="flex max-w-[70ch] items-start gap-2 rounded-[var(--radius-control)] border border-line bg-panel px-3 py-2.5 text-[0.8125rem] leading-relaxed text-ink">
+                <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-accent" />
+                <span>
+                  Gmail access is invite-only while Google reviews the app. Accounts that
+                  are not on the invite list are stopped at Google&rsquo;s consent screen.
+                </span>
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {demo ? (
+                  <>
+                    <Button type="button" variant="outline" disabled>
+                      Connect Gmail
+                    </Button>
+                    <Badge tone="neutral">Not available in the demo</Badge>
+                  </>
+                ) : (
+                  <form action={connectMailAccountAction}>
+                    <input type="hidden" name="provider" value="google" />
+                    <Button type="submit" variant="outline">
+                      Connect Gmail
+                    </Button>
+                  </form>
+                )}
+                {/*
+                 * Outlook has no sync implementation behind the provider port, so the OAuth
+                 * flow would complete, store a grant, and then fail in the worker — leaving a
+                 * connected mailbox that never brings mail in and an access grant the user has
+                 * to go and revoke. Refusing at the button is the honest version of that.
+                 * The badge sits beside it rather than in a tooltip: a disabled button is not
+                 * focusable, so an explanation only it carries is one a keyboard user never
+                 * hears.
+                 */}
+                <Button type="button" variant="outline" disabled>
+                  Connect Outlook
+                </Button>
+                <Badge tone="neutral">Coming soon</Badge>
+              </div>
             </CardContent>
           </Card>
         </section>

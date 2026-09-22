@@ -6,6 +6,7 @@ import {
   snoozeFollowUpBodySchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
+import { markDemoChanged } from "../services/demo/seed.js";
 import {
   dismissReminder,
   listDueReminders,
@@ -43,19 +44,21 @@ followUpsRouter.get("/follow-ups", async (req, res) => {
 
 /** `POST /follow-ups/:id/dismiss` — terminal. */
 followUpsRouter.post("/follow-ups/:reminderId/dismiss", async (req, res) => {
-  const { id: userId } = currentUser(req);
+  const user = currentUser(req);
   const { reminderId } = followUpIdParamsSchema.parse(req.params);
 
-  res.json(followUpReminderSchema.parse(await dismissReminder({ userId, reminderId })));
+  const result = await dismissReminder({ userId: user.id, reminderId });
+  if (user.demo) await markDemoChanged();
+  res.json(followUpReminderSchema.parse(result));
 });
 
 /** `POST /follow-ups/:id/snooze` — days, not a timestamp (see the body schema). */
 followUpsRouter.post("/follow-ups/:reminderId/snooze", async (req, res) => {
-  const { id: userId } = currentUser(req);
+  const user = currentUser(req);
   const { reminderId } = followUpIdParamsSchema.parse(req.params);
   const { days } = snoozeFollowUpBodySchema.parse(req.body ?? {});
 
-  res.json(
-    followUpReminderSchema.parse(await snoozeReminder({ userId, reminderId, days })),
-  );
+  const result = await snoozeReminder({ userId: user.id, reminderId, days });
+  if (user.demo) await markDemoChanged();
+  res.json(followUpReminderSchema.parse(result));
 });

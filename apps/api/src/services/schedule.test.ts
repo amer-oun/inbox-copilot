@@ -670,3 +670,65 @@ describe("listing", () => {
     expect(item?.timezone).toBe("Africa/Tunis");
   });
 });
+
+const { DEMO_USER_ID } = await import("@inbox-copilot/shared");
+const { DemoRestrictedError } = await import("../lib/errors.js");
+
+describe("the demo user", () => {
+  it("cannot schedule a reply, and nothing is read or written", async () => {
+    await expect(
+      scheduleReply({
+        userId: DEMO_USER_ID,
+        threadId: THREAD_ID,
+        body: "Later.",
+        sendAtLocal: "2026-09-17T09:00",
+        timezone: "Europe/London",
+        expectsReply: false,
+        now: NOW,
+      }),
+    ).rejects.toBeInstanceOf(DemoRestrictedError);
+
+    expect(threadFindFirst).not.toHaveBeenCalled();
+    expect(scheduledCreate).not.toHaveBeenCalled();
+    expect(queueAdd).not.toHaveBeenCalled();
+  });
+
+  it("cannot schedule a new message", async () => {
+    await expect(
+      scheduleNewMessage({
+        userId: DEMO_USER_ID,
+        mailAccountId: MAIL_ACCOUNT_ID,
+        to: ["someone@example.com"],
+        cc: [],
+        subject: "Hi",
+        body: "Later.",
+        sendAtLocal: "2026-09-17T09:00",
+        timezone: "Europe/London",
+        now: NOW,
+      }),
+    ).rejects.toBeInstanceOf(DemoRestrictedError);
+
+    expect(mailAccountFindFirst).not.toHaveBeenCalled();
+    expect(scheduledCreate).not.toHaveBeenCalled();
+  });
+
+  it("has its seeded queue skipped by the trigger, quietly and before any read", async () => {
+    const result = await runScheduledSend(
+      { scheduledEmailId: SCHEDULED_ID, userId: DEMO_USER_ID },
+      { now: NOW },
+    );
+
+    expect(result).toEqual({ status: "skipped", reason: "demo" });
+    expect(scheduledFindFirst).not.toHaveBeenCalled();
+    expect(scheduledUpdateMany).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("is left out of the sweeper's query", async () => {
+    rawScheduledFindMany.mockResolvedValue([]);
+    await sweepDueScheduledEmails({ now: NOW });
+
+    const where = rawScheduledFindMany.mock.calls[0]?.[0].where;
+    expect(where.userId).toEqual({ not: DEMO_USER_ID });
+  });
+});

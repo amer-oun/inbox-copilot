@@ -17,6 +17,7 @@
     "start:worker": "node dist/worker.js",
     "ai:stub": "tsx --env-file-if-exists=../../.env src/devtools/startAiStub.ts",
     "ai:sweep": "tsx --env-file-if-exists=../../.env src/scripts/aiSweep.ts",
+    "demo:seed": "tsx --env-file-if-exists=../../.env src/scripts/demoSeed.ts",
     "lint": "eslint ."
   },
   "dependencies": {

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { dbForUser, prisma } from "@inbox-copilot/db";
 import {
+  DEMO_USER_ID,
+  isDemoUserId,
   scheduledEmailSchema,
   type ScheduledEmailDto,
   type ScheduleStatus,
@@ -24,6 +26,7 @@ import {
   type ReplyTarget,
 } from "./send.js";
 import { createFollowUpReminder } from "./followUps.js";
+import { assertNotDemo } from "./demo/guard.js";
 
 /**
  * Scheduled send (§9).
@@ -175,6 +178,7 @@ export interface ScheduleReplyInput {
 export async function scheduleReply(
   input: ScheduleReplyInput,
 ): Promise<ScheduledEmailDto> {
+  assertNotDemo(input.userId, "schedule");
   const body = input.body.trim();
   if (body === "") throw new BadRequestError("A scheduled reply needs a body");
 
@@ -283,6 +287,7 @@ export interface ScheduleNewInput {
 export async function scheduleNewMessage(
   input: ScheduleNewInput,
 ): Promise<ScheduledEmailDto> {
+  assertNotDemo(input.userId, "schedule");
   const body = input.body.trim();
   if (body === "") throw new BadRequestError("A scheduled message needs a body");
 
@@ -517,6 +522,17 @@ export async function runScheduledSend(
     userId: job.userId,
     scheduledEmailId: job.scheduledEmailId,
   });
+
+  /*
+   * The demo's seeded queue is for looking at. Skipped quietly rather than thrown:
+   * a throw here fails the job, the sweeper finds the row still SCHEDULED a minute
+   * later, and the log fills with the same refusal for as long as nobody resets the
+   * demo. `mailProviderFor` would refuse it anyway (services/demo/guard.ts).
+   */
+  if (isDemoUserId(job.userId)) {
+    log.debug("demo scheduled send skipped");
+    return { status: "skipped", reason: "demo" };
+  }
 
   const row = await db.scheduledEmail.findFirst({
     where: { id: job.scheduledEmailId },
@@ -788,6 +804,8 @@ export async function sweepDueScheduledEmails(
     where: {
       status: "SCHEDULED",
       sendAt: { lte: new Date(now.getTime() + SWEEP_LEAD_MS) },
+      // The demo's queue is sample data; `runScheduledSend` would skip it anyway.
+      userId: { not: DEMO_USER_ID },
     },
     orderBy: { sendAt: "asc" },
     take: options.limit ?? SWEEP_BATCH,

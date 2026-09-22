@@ -50,6 +50,21 @@ const envSchema = z.object({
   INTERNAL_JWT_PRIVATE_KEY: base64Pem,
   INTERNAL_JWT_ISSUER: z.string().min(1).default("inbox-copilot-web"),
   INTERNAL_JWT_AUDIENCE: z.string().min(1).default("inbox-copilot-api"),
+
+  /**
+   * Show "Try the demo" and accept demo sessions (lib/demo.ts). Must match the API's
+   * `DEMO_MODE`: with it on here and off there, the button signs a visitor in and every
+   * page then fails its API call. Strict parse, like the API's.
+   */
+  DEMO_MODE: z
+    .enum(["true", "false", "1", "0"])
+    .default("false")
+    .transform((value) => value === "true" || value === "1"),
+  /**
+   * Where the demo banner's "by request" links to — a form, a mailto:, a profile page.
+   * Empty leaves the words as plain text rather than inventing a destination.
+   */
+  DEMO_ACCESS_REQUEST_URL: z.union([z.literal(""), z.url()]).default(""),
 });
 
 export type WebEnv = z.infer<typeof envSchema>;

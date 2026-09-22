@@ -13,16 +13,19 @@ person presses send.
 Full design rationale is in **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
 **[Live demo →](https://inbox-copilot-wheat.vercel.app)** — the web app on Vercel with
-the API on Render. You will get as far as the sign-in screen and no further: the Google
-OAuth client is in *testing* mode, so only addresses added to it as test users can sign
-in, and everyone else is turned away by Google with `access_denied`. That is Google's
-gate, not ours, and it is deliberate — the app requests `gmail.modify`, which is a
-restricted scope that cannot be offered to the public without a security assessment.
-Ask for your address to be added, or run it locally with your own OAuth client (see
-[Running it](#running-it)). Two more things worth knowing before you click: the API
-sleeps after 15 minutes idle on Render's free tier, so the first request after a quiet
-spell takes about a minute, and nothing in the demo has a mailbox connected until you
-connect one of your own.
+the API on Render. Press **Try the demo** on the sign-in page: it opens a shared sample
+mailbox with invented mail, pre-computed summaries and threat verdicts, and one phishing
+example with its warning banner. No Google account is needed, sending is switched off (the
+API refuses it, not just the UI), and whatever you change is put back for the next visitor.
+
+Signing in with Google is invite-only: the OAuth client is in *testing* mode, so only
+addresses added to it as test users can sign in, and everyone else is turned away by
+Google with `access_denied`. That is Google's gate, not ours, and it is deliberate — the app
+requests `gmail.modify`, a restricted scope that cannot be offered to the public without a
+security assessment. Ask for your address to be added, or run it locally with your own
+OAuth client (see [Running it](#running-it)). The API sleeps after 15 minutes idle on
+Render's free tier, so the first visit after a quiet spell shows "Starting up" for about
+half a minute before the page loads by itself.
 
 > **Outlook is not implemented.** You can sign _in_ with a Microsoft account and the
 > provider port has a place for it, but `mailProviderFor("OUTLOOK")` throws: there is no

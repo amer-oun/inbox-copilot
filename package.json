@@ -23,6 +23,7 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "ai:sweep": "pnpm --filter @inbox-copilot/api ai:sweep",
+    "demo:seed": "pnpm --filter @inbox-copilot/api demo:seed",
     "ai:stub": "pnpm --filter @inbox-copilot/api ai:stub",
     "clean": "turbo run clean && rimraf node_modules",
     "db:generate": "pnpm --filter @inbox-copilot/db db:generate",

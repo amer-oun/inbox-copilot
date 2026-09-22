@@ -10,6 +10,8 @@ import {
   writingStyleResponseSchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
+import { refuseDemo } from "../middleware/demo.js";
+import { demoReplies } from "../services/demo/ai.js";
 import { generateReplies } from "../services/ai/reply.js";
 import { composeMessage } from "../services/ai/compose.js";
 import { buildWritingStyle, getWritingStyle } from "../services/ai/style.js";
@@ -36,9 +38,22 @@ replyRouter.use(requireUser);
 
 /** `POST /threads/:id/replies` — three drafts. Nothing is sent. */
 replyRouter.post("/threads/:threadId/replies", async (req, res) => {
-  const { id: userId } = currentUser(req);
+  const user = currentUser(req);
+  const userId = user.id;
   const { threadId } = threadIdParamsSchema.parse(req.params);
   const { tone } = generateRepliesBodySchema.parse(req.body ?? {});
+
+  // The demo answers from pre-written drafts first and rations live calls
+  // (services/demo/ai.ts). Same response shape, same rule 1: nothing is sent.
+  if (user.demo) {
+    const result = await demoReplies({
+      user,
+      threadId,
+      ...(tone === undefined ? {} : { tone }),
+    });
+    res.status(201).json(replyDraftsResponseSchema.parse(result));
+    return;
+  }
 
   const result = await generateReplies({
     userId,
@@ -55,7 +70,7 @@ replyRouter.post("/threads/:threadId/replies", async (req, res) => {
  * The body is the text the user submitted. No model is called on this path at all:
  * `draftId` is recorded as feedback and is never read to decide what goes out.
  */
-replyRouter.post("/threads/:threadId/reply", async (req, res) => {
+replyRouter.post("/threads/:threadId/reply", refuseDemo("send"), async (req, res) => {
   const { id: userId } = currentUser(req);
   const { threadId } = threadIdParamsSchema.parse(req.params);
   const { body, draftId, expectsReply } = sendReplyBodySchema.parse(req.body);
@@ -72,7 +87,7 @@ replyRouter.post("/threads/:threadId/reply", async (req, res) => {
 });
 
 /** `POST /compose` — a new message, as text for the composer. Nothing is sent. */
-replyRouter.post("/compose", async (req, res) => {
+replyRouter.post("/compose", refuseDemo("compose"), async (req, res) => {
   const { id: userId } = currentUser(req);
   const { intent, to, tone } = composeBodySchema.parse(req.body);
 
@@ -99,7 +114,7 @@ replyRouter.get("/writing-style", async (req, res) => {
  * thirty messages, and "refresh" pressed twice should not bill twice for the same
  * answer. Without it, a profile built in the last month is returned as it stands.
  */
-replyRouter.post("/writing-style", async (req, res) => {
+replyRouter.post("/writing-style", refuseDemo("writingStyle"), async (req, res) => {
   const { id: userId } = currentUser(req);
   const force = req.query["force"] === "true";
 

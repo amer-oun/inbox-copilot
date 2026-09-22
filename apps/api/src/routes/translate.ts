@@ -5,6 +5,7 @@ import {
   translationSchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
+import { demoTranslate } from "../services/demo/ai.js";
 import { resolveTargetLang, translateMessage } from "../services/ai/translate.js";
 
 /**
@@ -28,7 +29,8 @@ export const translateRouter: Router = Router();
 translateRouter.use(requireUser);
 
 translateRouter.post("/messages/:messageId/translate", async (req, res) => {
-  const { id: userId } = currentUser(req);
+  const user = currentUser(req);
+  const userId = user.id;
   const { messageId } = messageIdParamsSchema.parse(req.params);
   const { targetLang } = translateBodySchema.parse(req.body ?? {});
 
@@ -37,6 +39,10 @@ translateRouter.post("/messages/:messageId/translate", async (req, res) => {
     ...(targetLang === undefined ? {} : { requested: targetLang }),
   });
 
-  const result = await translateMessage({ userId, messageId, targetLang: resolved });
+  // The demo serves its pre-written translations from the ordinary cache and rations
+  // any live call (services/demo/ai.ts).
+  const result = user.demo
+    ? await demoTranslate({ user, messageId, targetLang: resolved })
+    : await translateMessage({ userId, messageId, targetLang: resolved });
   res.json(translationSchema.parse(result));
 });

@@ -124,6 +124,7 @@ Optional, and everything keeps working without them:
 |---|---|
 | `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUBSUB_AUDIENCE`, `GMAIL_PUBSUB_SERVICE_ACCOUNT` | Real-time push sync — see [docs/gmail-push-setup.md](gmail-push-setup.md). Without them mail arrives on the keeper's schedule. |
 | `RESEND_API_KEY`, `DIGEST_FROM_ADDRESS` | The opt-in follow-up digest. Reminders work, resolve and display without it. |
+| `DEMO_MODE=true` | Accepts demo sessions — see [The public demo](#the-public-demo). Must match Vercel. |
 
 **Do not set on Render:** `INTERNAL_JWT_PRIVATE_KEY` (Vercel only), any `AUTH_*` variable
 (they are the web app's), `AI_STUB_PORT`, `GMAIL_WEBHOOK_DEV_TOKEN` (ignored in production
@@ -180,6 +181,10 @@ repo root is not the fix for the engine error, even though it looks like it shou
 | `INTERNAL_JWT_ISSUER` | `inbox-copilot-web` | Must match Render. |
 | `INTERNAL_JWT_AUDIENCE` | `inbox-copilot-api` | Must match Render. |
 | `DATABASE_URL` | Render Postgres **external** URL | Easy to miss: Auth.js uses the Prisma adapter, so the web app writes users and sessions to the same database. Without it sign-in fails. |
+
+Optional: `DEMO_MODE=true` shows "Try the demo" (must match Render — see
+[The public demo](#the-public-demo)), and `DEMO_ACCESS_REQUEST_URL` makes the demo banner's
+"by request" a link.
 
 `AUTH_MICROSOFT_ENTRA_ID_ID` / `_SECRET` are optional. Leave them out and the provider is
 not registered and its button is not rendered — which is the honest state, since Outlook
@@ -406,6 +411,36 @@ URL behind its proxy, and if that comes back `http://` where the browser said `h
 then *every write* 403s in production while reads keep working. Notably it does **not**
 read `x-forwarded-host`: trusting a header to say what our own origin is would hand the
 check to the sender, and what is behind it sends mail from the user's own address.
+
+---
+
+## The public demo
+
+While the Google client is in testing mode only listed test users can sign in, so a
+visitor who is not on the list has nothing to look at. `DEMO_MODE=true` on **both**
+services adds "Try the demo": a shared, invented mailbox (`apps/api/src/services/demo/`)
+that needs no Google account.
+
+- **No setup step.** The API seeds the demo mailbox on the first demo request after it
+  starts, and restores it when a visitor changed something (an appeal, a dismissed
+  reminder, a cancelled send) or when the last restore is over half an hour old. `pnpm
+  demo:seed` restores it by hand.
+- **It cannot send.** Send, send later, compose and every mailbox-connection route answer
+  403 for a demo session, the send and schedule services refuse the demo user, and
+  `mailProviderFor` refuses to build a provider client for it. The demo mailbox also has no
+  tokens and is `PAUSED`, so no background job picks it up.
+- **It cannot drain your AI quota.** Browsing makes no model calls: every summary, verdict
+  and classification is in the seed. "Draft 3 replies" and "Translate" answer from
+  pre-written results first; anything else is a live call rationed to 6 per visitor per
+  hour, 30 per hour across all visitors, and 60 per day (the demo user's
+  `dailyAiCallCap`, counted on the same ledger as every other user).
+- **It is labelled.** Every demo page carries a banner, and anything written in advance
+  says so instead of naming a model.
+
+A cold API is part of the same story: the first visitor after a quiet spell sees
+"Starting up, this takes about 30 seconds on the free server" and the page reloads itself
+when `/health` answers, instead of a server error. The sign-in page starts waking the API
+as soon as it loads.
 
 ---
 

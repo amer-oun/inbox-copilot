@@ -7,12 +7,15 @@ import {
   BellRing,
   CalendarClock,
   Check,
+  FlaskConical,
   Loader2,
   Send,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import {
+  DEMO_ERROR_CODES,
+  isDemoSampleModel,
   replyDraftsResponseSchema,
   replyToneSchema,
   scheduledEmailSchema,
@@ -52,6 +55,55 @@ function addressLabel(address: AddressDto): string {
   return address.name === null ? address.email : `${address.name} <${address.email}>`;
 }
 
+/**
+ * A failed request, keeping the API's error code.
+ *
+ * The code decides how the failure is shown: a demo refusal, a spent demo allowance or
+ * a waking server is a *notice* — the app working as intended — and shows as one,
+ * while anything else is an error.
+ */
+class RequestError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = "RequestError";
+    this.code = code;
+  }
+}
+
+const NOTICE_CODES: ReadonlySet<string> = new Set([
+  DEMO_ERROR_CODES.readOnly,
+  DEMO_ERROR_CODES.aiLimited,
+  "API_STARTING",
+]);
+
+function isNotice(error: Error): boolean {
+  return (
+    error instanceof RequestError && error.code !== null && NOTICE_CODES.has(error.code)
+  );
+}
+
+/** One failure, styled by what it means. */
+function Failure({ error, prefix }: { error: Error; prefix?: string }) {
+  if (isNotice(error)) {
+    return (
+      <p
+        role="status"
+        className="mt-2 flex items-start gap-2 rounded-[var(--radius-control)] border border-accent-line bg-accent-soft px-3 py-2 text-sm text-ink"
+      >
+        <FlaskConical aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-accent" />
+        {error.message}
+      </p>
+    );
+  }
+  return (
+    <p role="alert" className="mt-2 text-sm text-danger">
+      {prefix === undefined ? error.message : `${prefix}${error.message}`}
+    </p>
+  );
+}
+
 async function postJson(path: string, body: unknown): Promise<unknown> {
   const response = await fetch(path, {
     method: "POST",
@@ -65,14 +117,18 @@ async function postJson(path: string, body: unknown): Promise<unknown> {
   if (!response.ok) {
     // The API's error envelope, surfaced as-is: "daily AI call cap reached" is more
     // useful to read than "something went wrong".
+    const envelope =
+      typeof payload === "object" && payload !== null && "error" in payload
+        ? (payload as { error: { message?: unknown; code?: unknown } }).error
+        : undefined;
     const message =
-      typeof payload === "object" &&
-      payload !== null &&
-      "error" in payload &&
-      typeof (payload as { error: { message?: unknown } }).error?.message === "string"
-        ? (payload as { error: { message: string } }).error.message
+      typeof envelope?.message === "string"
+        ? envelope.message
         : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new RequestError(
+      message,
+      typeof envelope?.code === "string" ? envelope.code : null,
+    );
   }
 
   return payload;
@@ -118,9 +174,20 @@ export interface ReplyComposerProps {
   recipients: AddressDto[];
   /** The user's default, so the selector opens on what they would have chosen. */
   defaultTone?: ReplyTone;
+  /**
+   * A demo visit. Changes nothing about what the buttons *do* — they call the API, and
+   * the API refuses to send (apps/api/src/middleware/demo.ts) — only that the composer
+   * says so up front, so the refusal is not a surprise.
+   */
+  demo?: boolean;
 }
 
-export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyComposerProps) {
+export function ReplyComposer({
+  threadId,
+  recipients,
+  defaultTone,
+  demo = false,
+}: ReplyComposerProps) {
   const router = useRouter();
 
   const [tone, setTone] = useState<ReplyTone>(defaultTone ?? "PROFESSIONAL");
@@ -282,12 +349,9 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
       </header>
 
       {generate.isError && (
-        <p
-          role="alert"
-          className="border-b border-line bg-danger-soft px-4 py-2 text-sm text-danger"
-        >
-          {generate.error.message}
-        </p>
+        <div className="border-b border-line px-4 pb-2.5 pt-0.5">
+          <Failure error={generate.error} />
+        </div>
       )}
 
       {drafts.length > 0 && (
@@ -295,9 +359,11 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
           <p className="flex items-center gap-1.5 text-xs text-muted">
             <Sparkles aria-hidden="true" />
             <span className="sr-only">AI-generated: </span>
-            {styleApplied === false
-              ? "Three AI drafts. No writing-style profile yet, so these sound generic — read before sending."
-              : "Three AI drafts, matched to how you write. Read before sending."}
+            {drafts.every((draft) => isDemoSampleModel(draft.model))
+              ? "Three drafts written in advance for the demo. Other tones and threads are drafted live, within a small allowance."
+              : styleApplied === false
+                ? "Three AI drafts. No writing-style profile yet, so these sound generic — read before sending."
+                : "Three AI drafts, matched to how you write. Read before sending."}
           </p>
 
           <ul className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -360,6 +426,12 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
         />
 
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+          {demo ? (
+            <p className="flex items-center gap-1.5 text-xs text-muted">
+              <FlaskConical aria-hidden="true" className="size-3.5 text-accent" />
+              Demo: sending is switched off
+            </p>
+          ) : null}
           <p className="text-xs tabular-nums text-muted" aria-live="polite">
             {selected === null
               ? `${body.trim().length} characters`
@@ -477,9 +549,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
             </p>
 
             {schedule.isError && (
-              <p role="alert" className="mt-2 text-sm text-danger">
-                {`Not scheduled: ${schedule.error.message}`}
-              </p>
+              <Failure error={schedule.error} prefix="Not scheduled: " />
             )}
           </div>
         )}
@@ -497,11 +567,7 @@ export function ReplyComposer({ threadId, recipients, defaultTone }: ReplyCompos
           </p>
         )}
 
-        {send.isError && (
-          <p role="alert" className="mt-2 text-sm text-danger">
-            {`Not sent: ${send.error.message}`}
-          </p>
-        )}
+        {send.isError && <Failure error={send.error} prefix="Not sent: " />}
 
         {sentTo !== null && (
           <p

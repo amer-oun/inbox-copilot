@@ -5,6 +5,7 @@ import {
   threatAppealResponseSchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
+import { markDemoChanged } from "../services/demo/seed.js";
 import { recordThreatAppeal } from "../services/security/appeals.js";
 
 /**
@@ -26,15 +27,18 @@ export const threatRouter: Router = Router();
 threatRouter.use(requireUser);
 
 threatRouter.post("/messages/:messageId/threat-appeal", async (req, res) => {
-  const { id: userId } = currentUser(req);
+  const user = currentUser(req);
   const { messageId } = messageIdParamsSchema.parse(req.params);
   const { note } = threatAppealBodySchema.parse(req.body ?? {});
 
   const result = await recordThreatAppeal({
-    userId,
+    userId: user.id,
     messageId,
     ...(note === undefined ? {} : { note }),
   });
+  // Allowed in the demo, and undone for the next visitor (services/demo/seed.ts): the
+  // phishing banner is the point of the tour, so it must not arrive already appealed.
+  if (user.demo) await markDemoChanged();
 
   res.status(201).json(threatAppealResponseSchema.parse(result));
 });

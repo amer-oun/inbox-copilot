@@ -10,7 +10,7 @@ import {
   type ProviderSlug,
 } from "@inbox-copilot/shared";
 import { apiFetch } from "../../lib/apiClient";
-import { requireSession } from "../../lib/session";
+import { requireViewer, type Viewer } from "../../lib/viewer";
 import { z } from "zod";
 
 /**
@@ -21,12 +21,22 @@ import { z } from "zod";
  * which is the only process that can decrypt the vault.
  */
 
+/**
+ * The demo has no mailbox to manage. The API refuses these calls for a demo session
+ * anyway (apps/api/src/middleware/demo.ts); answering here as well turns the refusal
+ * into the Settings notice instead of an error page.
+ */
+function refuseDemo(viewer: Viewer): void {
+  if (viewer.kind === "demo") redirect("/settings?error=demo#mailboxes");
+}
+
 export async function connectMailAccountAction(formData: FormData): Promise<void> {
-  const session = await requireSession("/settings");
+  const viewer = await requireViewer("/settings");
+  refuseDemo(viewer);
   const provider: ProviderSlug = providerSlugSchema.parse(formData.get("provider"));
 
   const { authorizeUrl } = await apiFetch(
-    session.user.id,
+    viewer,
     `/mail-accounts/${provider}/connect`,
     connectMailAccountResponseSchema,
     { method: "POST" },
@@ -37,11 +47,12 @@ export async function connectMailAccountAction(formData: FormData): Promise<void
 }
 
 export async function disconnectMailAccountAction(formData: FormData): Promise<void> {
-  const session = await requireSession("/settings");
+  const viewer = await requireViewer("/settings");
+  refuseDemo(viewer);
   const mailAccountId = z.string().min(1).parse(formData.get("mailAccountId"));
 
   const outcome = await apiFetch(
-    session.user.id,
+    viewer,
     `/mail-accounts/${mailAccountId}`,
     disconnectMailAccountResponseSchema,
     { method: "DELETE" },
@@ -63,11 +74,12 @@ export async function disconnectMailAccountAction(formData: FormData): Promise<v
  * double click reports "already running" rather than syncing twice.
  */
 export async function syncMailAccountAction(formData: FormData): Promise<void> {
-  const session = await requireSession("/settings");
+  const viewer = await requireViewer("/settings");
+  refuseDemo(viewer);
   const mailAccountId = z.string().min(1).parse(formData.get("mailAccountId"));
 
   const result = await apiFetch(
-    session.user.id,
+    viewer,
     `/mail-accounts/${mailAccountId}/sync`,
     startSyncResponseSchema,
     { method: "POST" },

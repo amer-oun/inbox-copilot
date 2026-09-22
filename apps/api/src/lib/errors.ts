@@ -122,6 +122,26 @@ export class SyncCursorExpiredError extends AppError {
   readonly code = "SYNC_CURSOR_EXPIRED";
 }
 
+/**
+ * Something the public demo can never do: send, schedule, connect a mailbox, or
+ * anything else that would reach a real provider. 403 rather than 409 because no
+ * change of state would make it allowed — the demo session is the reason.
+ */
+export class DemoRestrictedError extends AppError {
+  readonly statusCode = 403;
+  readonly code = "DEMO_READ_ONLY";
+}
+
+/**
+ * A live model call the demo's budget cannot afford right now. Separate from
+ * `AiCapExceededError` so the message can say what still works (the pre-written
+ * results) instead of reading like a quota on the visitor's own account.
+ */
+export class DemoLimitError extends AppError {
+  readonly statusCode = 429;
+  readonly code = "DEMO_AI_LIMITED";
+}
+
 /** Push notifications are not configured for this deployment (no Pub/Sub topic). */
 export class PushNotConfiguredError extends AppError {
   readonly statusCode = 409;

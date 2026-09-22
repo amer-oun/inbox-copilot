@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { ApiError, apiFetch } from "../../../../lib/apiClient";
 import { env } from "../../../../lib/env";
-import { auth } from "../../../../auth";
+import { getViewer } from "../../../../lib/viewer";
 
 /**
  * The browser's only door to the core API (ARCHITECTURE §1).
@@ -161,19 +161,17 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ path: string[] }> },
 ): Promise<NextResponse> {
-  const session = await auth();
-  if (!session?.user?.id) return unauthorized();
+  // A signed-in account or a demo visit. The API holds each to what it may do (a demo
+  // visit is refused anything that sends or schedules); this layer only decides paths.
+  const viewer = await getViewer();
+  if (viewer === null) return unauthorized();
 
   const { path } = await context.params;
   const joined = path.join("/");
   if (!ALLOWED_GET_PATHS.some((pattern) => pattern.test(joined))) return notProxied();
 
   try {
-    const body = await apiFetch(
-      session.user.id,
-      targetPath(request, joined),
-      passthroughSchema,
-    );
+    const body = await apiFetch(viewer, targetPath(request, joined), passthroughSchema);
     return NextResponse.json(body, {
       // Per-user mail: never cached by a shared cache, never stored by the browser.
       headers: { "cache-control": "private, no-store" },
@@ -195,8 +193,10 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ path: string[] }> },
 ): Promise<NextResponse> {
-  const session = await auth();
-  if (!session?.user?.id) return unauthorized();
+  // A signed-in account or a demo visit. The API holds each to what it may do (a demo
+  // visit is refused anything that sends or schedules); this layer only decides paths.
+  const viewer = await getViewer();
+  if (viewer === null) return unauthorized();
 
   if (!assertSameOrigin(request)) {
     return NextResponse.json(
@@ -230,12 +230,10 @@ export async function POST(
   }
 
   try {
-    const body = await apiFetch(
-      session.user.id,
-      targetPath(request, joined),
-      passthroughSchema,
-      { method: "POST", body: payload },
-    );
+    const body = await apiFetch(viewer, targetPath(request, joined), passthroughSchema, {
+      method: "POST",
+      body: payload,
+    });
     return NextResponse.json(body, { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
     return asApiError(error);

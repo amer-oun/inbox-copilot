@@ -5,6 +5,7 @@ import { logger } from "../lib/logger.js";
 import { mailProviderFor } from "../providers/registry.js";
 import type { RawAddress } from "../providers/mailProvider.js";
 import { createFollowUpReminder } from "./followUps.js";
+import { assertNotDemo } from "./demo/guard.js";
 
 /**
  * Sending (rule 1, and the reason the rest of the AI layer is shaped the way it is).
@@ -188,6 +189,7 @@ export function textToHtml(text: string): string {
  * truth that disagrees with Gmail about what was sent.
  */
 export async function sendReply(input: SendReplyInput): Promise<SendResultDto> {
+  assertNotDemo(input.userId, "send");
   const body = input.body.trim();
   if (body === "") throw new BadRequestError("A reply needs a body");
 

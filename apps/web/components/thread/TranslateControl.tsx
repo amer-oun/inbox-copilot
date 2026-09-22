@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Languages, Loader2 } from "lucide-react";
-import { translationSchema, type TranslationDto } from "@inbox-copilot/shared";
+import {
+  DEMO_ERROR_CODES,
+  isDemoSampleModel,
+  translationSchema,
+  type TranslationDto,
+} from "@inbox-copilot/shared";
 import { Button } from "../ui/button";
 
 /**
@@ -46,6 +51,22 @@ const LANGUAGES: ReadonlyArray<{ code: string; label: string }> = [
   { code: "zh", label: "Chinese" },
 ];
 
+/** A failed request that keeps the API's code, so a demo limit reads as a notice. */
+class TranslateError extends Error {
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null) {
+    super(message);
+    this.name = "TranslateError";
+    this.code = code;
+  }
+}
+
+const NOTICE_CODES: ReadonlySet<string> = new Set([
+  DEMO_ERROR_CODES.aiLimited,
+  "API_STARTING",
+]);
+
 async function postTranslate(messageId: string, targetLang: string): Promise<unknown> {
   const response = await fetch(`/api/proxy/messages/${messageId}/translate`, {
     method: "POST",
@@ -58,14 +79,18 @@ async function postTranslate(messageId: string, targetLang: string): Promise<unk
 
   if (!response.ok) {
     // Surfaced as-is: "daily AI call cap reached" is more useful than "failed".
+    const envelope =
+      typeof payload === "object" && payload !== null && "error" in payload
+        ? (payload as { error: { message?: unknown; code?: unknown } }).error
+        : undefined;
     const message =
-      typeof payload === "object" &&
-      payload !== null &&
-      "error" in payload &&
-      typeof (payload as { error: { message?: unknown } }).error?.message === "string"
-        ? (payload as { error: { message: string } }).error.message
+      typeof envelope?.message === "string"
+        ? envelope.message
         : `Request failed (${response.status})`;
-    throw new Error(message);
+    throw new TranslateError(
+      message,
+      typeof envelope?.code === "string" ? envelope.code : null,
+    );
   }
 
   return payload;
@@ -129,18 +154,27 @@ export function TranslateControl({ messageId, defaultLang }: TranslateControlPro
 
         {translation !== null && !stale && (
           <span className="text-xs text-muted">
-            {translation.fromCache
-              ? "From cache — no new AI call."
-              : `Translated by ${translation.model}.`}
+            {isDemoSampleModel(translation.model)
+              ? "Written in advance for the demo — no AI call."
+              : translation.fromCache
+                ? "From cache — no new AI call."
+                : `Translated by ${translation.model}.`}
           </span>
         )}
       </div>
 
-      {translate.isError && (
-        <p role="alert" className="mt-2 text-sm text-danger">
-          {translate.error.message}
-        </p>
-      )}
+      {translate.isError &&
+        (translate.error instanceof TranslateError &&
+        translate.error.code !== null &&
+        NOTICE_CODES.has(translate.error.code) ? (
+          <p role="status" className="mt-2 text-sm text-muted">
+            {translate.error.message}
+          </p>
+        ) : (
+          <p role="alert" className="mt-2 text-sm text-danger">
+            {translate.error.message}
+          </p>
+        ))}
 
       {translation !== null && !stale && (
         <section

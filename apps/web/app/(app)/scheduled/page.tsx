@@ -1,6 +1,7 @@
 import { scheduledListSchema } from "@inbox-copilot/shared";
-import { apiFetch } from "../../../lib/apiClient";
-import { requireSession } from "../../../lib/session";
+import { apiFetch, isApiUnavailable } from "../../../lib/apiClient";
+import { requireViewer } from "../../../lib/viewer";
+import { StartingUp } from "../../../components/shell/StartingUp";
 import { ScheduledList } from "../../../components/scheduled/ScheduledList";
 import { PageBody, PageHeader } from "../../../components/shell/PageHeader";
 
@@ -16,9 +17,15 @@ import { PageBody, PageHeader } from "../../../components/shell/PageHeader";
 export const metadata = { title: "Scheduled" };
 
 export default async function ScheduledPage() {
-  const session = await requireSession("/scheduled");
+  const viewer = await requireViewer("/scheduled");
 
-  const { items } = await apiFetch(session.user.id, "/scheduled", scheduledListSchema);
+  let items;
+  try {
+    ({ items } = await apiFetch(viewer, "/scheduled", scheduledListSchema));
+  } catch (error) {
+    if (isApiUnavailable(error)) return <StartingUp />;
+    throw error;
+  }
 
   const pending = items.filter((item) => item.status === "SCHEDULED").length;
   const failed = items.filter((item) => item.status === "FAILED").length;

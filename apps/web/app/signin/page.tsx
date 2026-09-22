@@ -1,8 +1,19 @@
 import { redirect } from "next/navigation";
-import { AlertTriangle, FileLock2, Mail, ShieldCheck, Sparkles } from "lucide-react";
-import { auth, microsoftSignInEnabled, signIn } from "../../auth";
+import {
+  AlertTriangle,
+  FileLock2,
+  FlaskConical,
+  Mail,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
+import { microsoftSignInEnabled, signIn } from "../../auth";
+import { startDemoAction } from "../actions/auth";
+import { demoEnabled } from "../../lib/demo";
+import { getViewer } from "../../lib/viewer";
 import { Button } from "../../components/ui/button";
 import { ThemeToggle } from "../../components/shell/ThemeToggle";
+import { WakeApi } from "../../components/shell/WakeApi";
 
 /**
  * Sign-in asks for identity only — `openid profile email`. Mailbox access is a
@@ -15,6 +26,11 @@ import { ThemeToggle } from "../../components/shell/ThemeToggle";
  * they will not read. On a phone it moves *below* the buttons — the person already
  * decided to sign in, and making them scroll past marketing to reach the control
  * is the wrong order.
+ *
+ * With `DEMO_MODE` on, "Try the demo" comes first. Google sign-in only works for
+ * listed test users while the app is in Google's review, so for almost every visitor
+ * the demo is the button that does something — and it says under the Google button
+ * that sign-in is invite-only, so nobody finds out from Google's "access blocked" page.
  */
 
 interface SignInPageProps {
@@ -54,11 +70,12 @@ const PROMISES = [
 ] as const;
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
-  const session = await auth();
+  const viewer = await getViewer();
   const { next, error } = await searchParams;
+  const demo = demoEnabled();
 
-  if (session?.user?.id) {
-    redirect(next ?? "/inbox/all");
+  if (viewer !== null) {
+    redirect(next?.startsWith("/") ? next : "/inbox/all");
   }
 
   // Only same-site paths — an open redirect here would be a phishing primitive.
@@ -72,6 +89,7 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-2">
+      {demo ? <WakeApi /> : null}
       {/* ── The control column ───────────────────────────────────────────── */}
       <main className="flex min-h-dvh flex-col justify-center px-6 py-12 sm:px-10 lg:min-h-0">
         <div className="mx-auto w-full max-w-sm">
@@ -105,12 +123,40 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
             </p>
           ) : null}
 
-          <div className="mt-7 space-y-2.5">
+          {demo ? (
+            <div className="mt-7">
+              <form action={startDemoAction}>
+                <Button type="submit" size="lg" block>
+                  <FlaskConical aria-hidden="true" />
+                  Try the demo
+                </Button>
+              </form>
+              <p className="mt-2 text-xs leading-relaxed text-muted">
+                No Google account needed. A sample mailbox with invented mail — sending is
+                switched off.
+              </p>
+              <div
+                className="mt-6 flex items-center gap-3 text-xs text-faint"
+                aria-hidden="true"
+              >
+                <span className="h-px flex-1 bg-line" />
+                or sign in
+                <span className="h-px flex-1 bg-line" />
+              </div>
+            </div>
+          ) : null}
+
+          <div className={demo ? "mt-6 space-y-2.5" : "mt-7 space-y-2.5"}>
             <form action={signInWith.bind(null, "google")}>
               <Button type="submit" variant="outline" size="lg" block>
                 Continue with Google
               </Button>
             </form>
+            {demo ? (
+              <p className="text-xs leading-relaxed text-muted">
+                Invite-only while Google reviews the app.
+              </p>
+            ) : null}
             {/*
               Shown only when Microsoft is configured. A button for an unregistered
               provider fails at login.microsoftonline.com, which looks like our bug.

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogOut, Mail } from "lucide-react";
+import { FlaskConical, LogOut, Mail } from "lucide-react";
 import { signOutAction } from "../../app/actions/auth";
 import { Button } from "../ui/button";
 import { AppNav } from "./AppNav";
@@ -29,6 +29,8 @@ import { MOBILE_BAR_HEIGHT } from "./layout";
 
 export interface AppShellProps {
   user: { name?: string | null; email?: string | null };
+  /** Set for a demo visit: shows the banner and turns "Sign out" into "Exit demo". */
+  demo?: { requestAccessUrl: string | null } | null;
   children: React.ReactNode;
 }
 
@@ -46,25 +48,64 @@ function Wordmark() {
   );
 }
 
-function SignOutButton({ label }: { label: "full" | "icon" }) {
+function SignOutButton({ label, demo }: { label: "full" | "icon"; demo: boolean }) {
+  const text = demo ? "Exit demo" : "Sign out";
   return (
     <form action={signOutAction}>
       {label === "full" ? (
         <Button type="submit" variant="ghost" size="sm" block className="justify-start">
           <LogOut aria-hidden="true" />
-          Sign out
+          {text}
         </Button>
       ) : (
-        <Button type="submit" variant="ghost" size="icon-sm" title="Sign out">
+        <Button type="submit" variant="ghost" size="icon-sm" title={text}>
           <LogOut aria-hidden="true" />
-          <span className="sr-only">Sign out</span>
+          <span className="sr-only">{text}</span>
         </Button>
       )}
     </form>
   );
 }
 
-export function AppShell({ user, children }: AppShellProps) {
+/**
+ * On every page of a demo visit, above the page's own header.
+ *
+ * Plain about what this is: invented mail, and the real thing is by invitation. Not
+ * sticky — it is a label, not an alarm, and the sticky page header below it is what
+ * the reader needs on screen while scrolling a thread.
+ */
+function DemoBanner({ requestAccessUrl }: { requestAccessUrl: string | null }) {
+  return (
+    <div
+      role="note"
+      className="flex items-start gap-2 border-b border-accent-line bg-accent-soft px-4 py-2 text-[0.8125rem] leading-snug text-ink sm:items-center sm:px-6"
+    >
+      <FlaskConical
+        aria-hidden="true"
+        className="mt-0.5 size-4 shrink-0 text-accent sm:mt-0"
+      />
+      <p className="min-w-0">
+        Demo mailbox with sample data. Connect your own Gmail{" "}
+        {requestAccessUrl === null ? (
+          "by request"
+        ) : (
+          <a
+            href={requestAccessUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="font-medium text-accent underline underline-offset-2"
+          >
+            by request
+          </a>
+        )}
+        .
+      </p>
+    </div>
+  );
+}
+
+export function AppShell({ user, demo = null, children }: AppShellProps) {
+  const isDemo = demo !== null;
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[15rem_1fr]">
       {/* ── Sidebar (wide screens) ───────────────────────────────────────── */}
@@ -90,7 +131,7 @@ export function AppShell({ user, children }: AppShellProps) {
                 </span>
               </span>
             </div>
-            <SignOutButton label="full" />
+            <SignOutButton label="full" demo={isDemo} />
             <div className="px-1.5">
               <ThemeToggle />
             </div>
@@ -125,10 +166,12 @@ export function AppShell({ user, children }: AppShellProps) {
                 <Avatar name={user.name} email={user.email} />
                 <span className="sr-only">Account and settings</span>
               </Link>
-              <SignOutButton label="icon" />
+              <SignOutButton label="icon" demo={isDemo} />
             </div>
           </div>
         </header>
+
+        {demo !== null ? <DemoBanner requestAccessUrl={demo.requestAccessUrl} /> : null}
 
         <main className="min-w-0 flex-1 pb-[calc(4.25rem+env(safe-area-inset-bottom))] lg:pb-0">
           {children}

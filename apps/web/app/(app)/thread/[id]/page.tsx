@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Reply } from "lucide-react";
 import { threadDetailSchema } from "@inbox-copilot/shared";
-import { ApiError, apiFetch } from "../../../../lib/apiClient";
-import { requireSession } from "../../../../lib/session";
+import { ApiError, apiFetch, isApiUnavailable } from "../../../../lib/apiClient";
+import { requireViewer } from "../../../../lib/viewer";
+import { StartingUp } from "../../../../components/shell/StartingUp";
 import { Badge } from "../../../../components/ui/badge";
 import { PageBody, PageHeader } from "../../../../components/shell/PageHeader";
 import { SummaryCard } from "../../../../components/thread/SummaryCard";
@@ -34,12 +35,13 @@ export async function generateMetadata({ params }: ThreadPageProps) {
 
 export default async function ThreadPage({ params }: ThreadPageProps) {
   const { id } = await params;
-  const session = await requireSession(`/thread/${id}`);
+  const viewer = await requireViewer(`/thread/${id}`);
 
   let thread;
   try {
-    thread = await apiFetch(session.user.id, `/threads/${id}`, threadDetailSchema);
+    thread = await apiFetch(viewer, `/threads/${id}`, threadDetailSchema);
   } catch (error) {
+    if (isApiUnavailable(error)) return <StartingUp />;
     // A thread belonging to someone else is a 404 from the API (the tenancy filter
     // makes it not exist), and it stays a 404 here — no "forbidden" that would
     // confirm the id is real.
@@ -128,7 +130,11 @@ export default async function ThreadPage({ params }: ThreadPageProps) {
           is handed down from the API rather than derived here: the address on the send
           button must be the address the send path will actually use.
         */}
-        <ReplyComposer threadId={thread.id} recipients={thread.replyRecipients} />
+        <ReplyComposer
+          threadId={thread.id}
+          recipients={thread.replyRecipients}
+          demo={viewer.kind === "demo"}
+        />
       </PageBody>
     </>
   );

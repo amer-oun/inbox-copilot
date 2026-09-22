@@ -4,8 +4,9 @@ import {
   threadListSchema,
   type ThreadCategoryFilter,
 } from "@inbox-copilot/shared";
-import { apiFetch } from "../../../../lib/apiClient";
-import { requireSession } from "../../../../lib/session";
+import { apiFetch, isApiUnavailable } from "../../../../lib/apiClient";
+import { requireViewer } from "../../../../lib/viewer";
+import { StartingUp } from "../../../../components/shell/StartingUp";
 import { CategoryTabs, CATEGORY_TABS } from "../../../../components/inbox/CategoryTabs";
 import { ThreadList } from "../../../../components/inbox/ThreadList";
 import { PageHeader } from "../../../../components/shell/PageHeader";
@@ -31,7 +32,7 @@ export async function generateMetadata({ params }: InboxPageProps) {
 
 export default async function InboxPage({ params }: InboxPageProps) {
   const { category: raw } = await params;
-  const session = await requireSession(`/inbox/${raw}`);
+  const viewer = await requireViewer(`/inbox/${raw}`);
 
   // The URL segment is user input: an unknown category is a 404, not an unfiltered
   // list of everything.
@@ -40,11 +41,18 @@ export default async function InboxPage({ params }: InboxPageProps) {
   const category: ThreadCategoryFilter = parsed.data;
 
   const query = new URLSearchParams({ category });
-  const initialPage = await apiFetch(
-    session.user.id,
-    `/threads?${query.toString()}`,
-    threadListSchema,
-  );
+  let initialPage;
+  try {
+    initialPage = await apiFetch(
+      viewer,
+      `/threads?${query.toString()}`,
+      threadListSchema,
+    );
+  } catch (error) {
+    // The first visitor after a quiet spell meets a sleeping API; tell them, and wait.
+    if (isApiUnavailable(error)) return <StartingUp />;
+    throw error;
+  }
 
   return (
     <>

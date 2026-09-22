@@ -187,6 +187,20 @@ const envSchema = z.object({
    */
   DIGEST_FROM_ADDRESS: z.union([z.literal(""), z.email()]).default(""),
 
+  /**
+   * Accept demo sessions: the shared, invented mailbox a visitor can open without
+   * Google (`services/demo/`). Off by default, so a deployment has to opt in to having
+   * a public account at all. With it off, a token carrying the demo claim is refused
+   * like any other invalid token.
+   *
+   * Strict parse for the same reason as `WORKER_IN_PROCESS`: a typo must not silently
+   * decide whether strangers can sign in.
+   */
+  DEMO_MODE: z
+    .enum(["true", "false", "1", "0"])
+    .default("false")
+    .transform((value) => value === "true" || value === "1"),
+
   MICROSOFT_CLIENT_ID: z.string().default(""),
   MICROSOFT_CLIENT_SECRET: z.string().default(""),
   /** "common" for multi-tenant + personal accounts; a GUID to lock to one tenant. */

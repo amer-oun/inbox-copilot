@@ -5,6 +5,7 @@ import { microsoftOAuthClient } from "./microsoft/client.js";
 import type { MailProvider, MailProviderContext } from "./mailProvider.js";
 import type { OAuthProviderClient } from "./types.js";
 import { InternalError } from "../lib/errors.js";
+import { assertNotDemo } from "../services/demo/guard.js";
 
 const CLIENTS: Readonly<Record<ProviderSlug, OAuthProviderClient>> = {
   google: googleOAuthClient,
@@ -33,6 +34,9 @@ export function mailProviderFor(
   providerType: MailProviderType,
   context: MailProviderContext,
 ): MailProvider {
+  // The last wall under the demo (services/demo/guard.ts): whatever path got here,
+  // the shared demo mailbox never gets a provider client.
+  assertNotDemo(context.userId, "provider");
   switch (providerType) {
     case "GMAIL":
       return createGmailProvider(context);

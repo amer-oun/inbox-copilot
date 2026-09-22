@@ -8,6 +8,8 @@ import {
   scheduleReplyBodySchema,
 } from "@inbox-copilot/shared";
 import { currentUser, requireUser } from "../middleware/auth.js";
+import { refuseDemo } from "../middleware/demo.js";
+import { markDemoChanged } from "../services/demo/seed.js";
 import {
   cancelScheduledEmail,
   listScheduledEmails,
@@ -39,7 +41,7 @@ export const scheduledRouter: Router = Router();
 scheduledRouter.use(requireUser);
 
 /** `POST /scheduled/replies` — a reply into an existing thread, at a chosen time. */
-scheduledRouter.post("/scheduled/replies", async (req, res) => {
+scheduledRouter.post("/scheduled/replies", refuseDemo("schedule"), async (req, res) => {
   const { id: userId } = currentUser(req);
   const { threadId, body, sendAtLocal, timezone, expectsReply, draftId } =
     scheduleReplyBodySchema.parse(req.body);
@@ -58,7 +60,7 @@ scheduledRouter.post("/scheduled/replies", async (req, res) => {
 });
 
 /** `POST /scheduled/messages` — a new message, at a chosen time. */
-scheduledRouter.post("/scheduled/messages", async (req, res) => {
+scheduledRouter.post("/scheduled/messages", refuseDemo("schedule"), async (req, res) => {
   const { id: userId } = currentUser(req);
   const { mailAccountId, to, cc, subject, body, sendAtLocal, timezone } =
     scheduleNewBodySchema.parse(req.body);
@@ -99,9 +101,12 @@ scheduledRouter.get("/scheduled", async (req, res) => {
 
 /** `POST /scheduled/:id/cancel` — refuses once the send has started. */
 scheduledRouter.post("/scheduled/:scheduledId/cancel", async (req, res) => {
-  const { id: userId } = currentUser(req);
+  const user = currentUser(req);
   const { scheduledId } = scheduledIdParamsSchema.parse(req.params);
 
-  const result = await cancelScheduledEmail({ userId, scheduledId });
+  const result = await cancelScheduledEmail({ userId: user.id, scheduledId });
+  // Cancelling is allowed in the demo — it only touches the seeded row — but the next
+  // visitor should find the queue as it was seeded (services/demo/seed.ts).
+  if (user.demo) await markDemoChanged();
   res.json(scheduledEmailSchema.parse(result));
 });

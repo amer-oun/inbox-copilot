@@ -12,6 +12,7 @@ import { threatRouter } from "./routes/threat.js";
 import { scheduledRouter } from "./routes/scheduled.js";
 import { followUpsRouter } from "./routes/followUps.js";
 import { translateRouter } from "./routes/translate.js";
+import { demoRouter } from "./routes/demo.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.js";
 
 export function createApp(): Express {
@@ -59,6 +60,7 @@ export function createApp(): Express {
   app.use(scheduledRouter);
   app.use(followUpsRouter);
   app.use(translateRouter);
+  app.use(demoRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

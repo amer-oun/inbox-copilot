@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const apiFetch = vi.hoisted(() => vi.fn());
-const auth = vi.hoisted(() => vi.fn());
+const getViewer = vi.hoisted(() => vi.fn());
 
 class FakeApiError extends Error {
   constructor(
@@ -22,7 +22,7 @@ class FakeApiError extends Error {
 }
 
 vi.mock("../../../../lib/apiClient", () => ({ apiFetch, ApiError: FakeApiError }));
-vi.mock("../../../../auth", () => ({ auth }));
+vi.mock("../../../../lib/viewer", () => ({ getViewer }));
 
 /**
  * The real module validates a deployment's worth of secrets on first read, which a unit
@@ -61,7 +61,13 @@ function post(
 }
 
 beforeEach(() => {
-  auth.mockReset().mockResolvedValue({ user: { id: USER_ID } });
+  getViewer.mockReset().mockResolvedValue({
+    kind: "user",
+    userId: USER_ID,
+    name: null,
+    email: null,
+    expires: "2030-01-01T00:00:00.000Z",
+  });
   apiFetch.mockReset().mockResolvedValue({ ok: true });
 });
 
@@ -102,7 +108,7 @@ describe("reads", () => {
   });
 
   it("needs a session", async () => {
-    auth.mockResolvedValue(null);
+    getViewer.mockResolvedValue(null);
     const response = await GET(get("threads"), params("threads"));
 
     expect(response.status).toBe(401);
@@ -246,7 +252,7 @@ describe("writes", () => {
   });
 
   it("needs a session", async () => {
-    auth.mockResolvedValue(null);
+    getViewer.mockResolvedValue(null);
     const path = `threads/${THREAD_ID}/reply`;
 
     expect((await POST(post(path, { body: "ok" }), params(path))).status).toBe(401);
@@ -354,5 +360,53 @@ describe("the same-origin check across a proxy", () => {
 
     expect(response.status).toBe(403);
     expect(apiFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("demo visits", () => {
+  const DEMO_VIEWER = {
+    kind: "demo",
+    userId: "cdemouser0000000000000001",
+    demoSessionId: "visit_aaaaaaaaaaaaaaaa",
+    name: "Sam Whitfield",
+    email: "sam@northwind-freight.com",
+    expires: "2030-01-01T00:00:00.000Z",
+  };
+
+  it("calls the API as the demo visit, so the API can hold it to the demo's rules", async () => {
+    getViewer.mockResolvedValue(DEMO_VIEWER);
+
+    await POST(
+      post(`threads/${THREAD_ID}/reply`, { body: "hi" }),
+      params(`threads/${THREAD_ID}/reply`),
+    );
+
+    // The proxy does not decide what a demo visit may do — it forwards, and the API
+    // refuses to send. What it must get right is *who* it calls as.
+    expect(apiFetch.mock.calls[0]?.[0]).toBe(DEMO_VIEWER);
+  });
+
+  it("surfaces the API's demo refusal as-is", async () => {
+    getViewer.mockResolvedValue(DEMO_VIEWER);
+    apiFetch.mockRejectedValue(
+      new FakeApiError(
+        403,
+        "DEMO_READ_ONLY",
+        "Sending is disabled in the demo. Nothing was sent.",
+      ),
+    );
+
+    const response = await POST(
+      post(`threads/${THREAD_ID}/reply`, { body: "hi" }),
+      params(`threads/${THREAD_ID}/reply`),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "DEMO_READ_ONLY",
+        message: "Sending is disabled in the demo. Nothing was sent.",
+      },
+    });
   });
 });
